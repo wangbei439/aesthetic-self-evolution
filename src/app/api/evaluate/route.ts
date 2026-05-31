@@ -150,41 +150,80 @@ export async function POST(request: Request) {
       );
     }
     const imageFile = formData.get("image");
-
-    if (!imageFile || !(imageFile instanceof File)) {
-      return NextResponse.json(
-        { error: "Missing or invalid 'image' file in form data" },
-        { status: 400 }
-      );
-    }
-
-    // Validate file size (max 10MB)
-    if (imageFile.size > 10 * 1024 * 1024) {
-      return NextResponse.json(
-        { error: "Image file too large (max 10MB)" },
-        { status: 400 }
-      );
-    }
-
-    // Validate file type
-    const allowedTypes = [
-      "image/png",
-      "image/jpeg",
-      "image/webp",
-      "image/gif",
-      "image/bmp",
-    ];
-    if (!allowedTypes.includes(imageFile.type)) {
-      return NextResponse.json(
-        { error: `Unsupported image type: ${imageFile.type}` },
-        { status: 400 }
-      );
-    }
-
+    const imageUrl = formData.get("imageUrl") as string | null;
     const familyKeyParam = formData.get("familyKey") as string | null;
 
-    // ---- Convert image to base64 ----
-    const imageBase64 = await fileToBase64(imageFile);
+    let imageBase64: string;
+
+    if (imageFile && imageFile instanceof File) {
+      // Validate file size (max 10MB)
+      if (imageFile.size > 10 * 1024 * 1024) {
+        return NextResponse.json(
+          { error: "Image file too large (max 10MB)" },
+          { status: 400 }
+        );
+      }
+
+      // Validate file type
+      const allowedTypes = [
+        "image/png",
+        "image/jpeg",
+        "image/webp",
+        "image/gif",
+        "image/bmp",
+      ];
+      if (!allowedTypes.includes(imageFile.type)) {
+        return NextResponse.json(
+          { error: `Unsupported image type: ${imageFile.type}` },
+          { status: 400 }
+        );
+      }
+
+      // ---- Convert image to base64 ----
+      imageBase64 = await fileToBase64(imageFile);
+    } else if (imageUrl && imageUrl.trim()) {
+      // ---- Fetch image from URL ----
+      try {
+        const urlRes = await fetch(imageUrl.trim(), {
+          headers: {
+            'User-Agent': 'Aesthetic-Self-Evolution/1.0',
+          },
+        });
+        if (!urlRes.ok) {
+          return NextResponse.json(
+            { error: `Failed to fetch image from URL: ${urlRes.status} ${urlRes.statusText}` },
+            { status: 400 }
+          );
+        }
+        const contentType = urlRes.headers.get('content-type') || '';
+        if (!contentType.startsWith('image/')) {
+          return NextResponse.json(
+            { error: `URL does not point to an image (content-type: ${contentType})` },
+            { status: 400 }
+          );
+        }
+        const arrayBuffer = await urlRes.arrayBuffer();
+        if (arrayBuffer.byteLength > 10 * 1024 * 1024) {
+          return NextResponse.json(
+            { error: "Image from URL too large (max 10MB)" },
+            { status: 400 }
+          );
+        }
+        const buffer = Buffer.from(arrayBuffer);
+        const base64 = buffer.toString('base64');
+        imageBase64 = `data:${contentType};base64,${base64}`;
+      } catch (fetchErr) {
+        return NextResponse.json(
+          { error: `Failed to fetch image from URL: ${fetchErr instanceof Error ? fetchErr.message : 'Unknown error'}` },
+          { status: 400 }
+        );
+      }
+    } else {
+      return NextResponse.json(
+        { error: "Missing 'image' file or 'imageUrl' in form data" },
+        { status: 400 }
+      );
+    }
 
     // ---- Initialize VLM client ----
     const zai = await ZAI.create();

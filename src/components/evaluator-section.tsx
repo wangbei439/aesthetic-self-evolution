@@ -14,6 +14,9 @@ import {
   MessageSquare,
   ChevronDown,
   Send,
+  Link,
+  RefreshCw,
+  ArrowUpDown,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -56,6 +59,11 @@ interface EvaluationResult {
     suggestions: string[]
     assessment: string
   }
+  // Re-evaluation fields
+  comparisonWithPrevious?: string | null
+  previousScore?: number
+  scoreDelta?: number
+  previousEvaluationId?: string
   evolutionGeneration: number
   ruleVersionUsed: string | null
   createdAt: string
@@ -92,6 +100,8 @@ const FAMILY_DISPLAY_NAMES: Record<string, string> = {
   dynamic_rhythm: '动态韵律',
 }
 
+type ImageSource = 'upload' | 'url'
+
 interface EvaluatorSectionProps {
   preselectedFamily: string | null
 }
@@ -99,6 +109,8 @@ interface EvaluatorSectionProps {
 export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
   const [image, setImage] = useState<string | null>(null)
   const [imageFile, setImageFile] = useState<File | null>(null)
+  const [imageUrl, setImageUrl] = useState('')
+  const [imageSource, setImageSource] = useState<ImageSource>('upload')
   const [familyKey, setFamilyKey] = useState<string>('auto')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<EvaluationResult | null>(null)
@@ -109,6 +121,7 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
   const [humanFeedbackText, setHumanFeedbackText] = useState('')
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false)
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false)
+  const [reevaluating, setReevaluating] = useState(false)
 
   useEffect(() => {
     if (preselectedFamily) {
@@ -154,8 +167,13 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
   }, [])
 
   const handleEvaluate = async () => {
-    if (!imageFile) {
+    // Validate based on image source
+    if (imageSource === 'upload' && !imageFile) {
       toast.error('请先上传一张图片')
+      return
+    }
+    if (imageSource === 'url' && !imageUrl.trim()) {
+      toast.error('请输入图片URL')
       return
     }
 
@@ -168,7 +186,11 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
 
     try {
       const formData = new FormData()
-      formData.append('image', imageFile)
+      if (imageSource === 'upload' && imageFile) {
+        formData.append('image', imageFile)
+      } else if (imageSource === 'url') {
+        formData.append('imageUrl', imageUrl.trim())
+      }
       if (familyKey && familyKey !== 'auto') {
         formData.append('familyKey', familyKey)
       }
@@ -193,9 +215,36 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
     }
   }
 
+  const handleReevaluate = async () => {
+    if (!result?.id) return
+
+    setReevaluating(true)
+    try {
+      const res = await fetch('/api/reevaluate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ evaluationId: result.id }),
+      })
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.error || '重新评估失败')
+      }
+
+      const data = await res.json()
+      setResult(data)
+      toast.success(`重新评估完成！评分变化: ${data.scoreDelta >= 0 ? '+' : ''}${data.scoreDelta}`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '重新评估失败，请重试')
+    } finally {
+      setReevaluating(false)
+    }
+  }
+
   const clearImage = () => {
     setImage(null)
     setImageFile(null)
+    setImageUrl('')
     setResult(null)
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
@@ -231,7 +280,7 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
             审美评估器
           </h2>
           <p className="text-slate-400 text-lg max-w-2xl mx-auto">
-            上传图片，选择审美家族，获取域感知的精准审美评估
+            上传图片或输入URL，选择审美家族，获取域感知的精准审美评估
           </p>
         </motion.div>
 
@@ -247,66 +296,121 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
               <CardHeader>
                 <CardTitle className="text-slate-200 flex items-center gap-2">
                   <FileImage className="w-5 h-5 text-amber-400" />
-                  图片上传
+                  图片输入
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {/* Upload area */}
-                <div
-                  className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-all duration-300 cursor-pointer ${
-                    dragOver
-                      ? 'border-amber-400 bg-amber-500/5'
-                      : image
-                        ? 'border-slate-600 bg-slate-800/50'
-                        : 'border-slate-600 hover:border-amber-400/50 hover:bg-slate-800/30'
-                  }`}
-                  onDrop={handleDrop}
-                  onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave}
-                  onClick={() => !image && fileInputRef.current?.click()}
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0]
-                      if (file) handleFileSelect(file)
-                    }}
-                  />
-
-                  {image ? (
-                    <div className="relative">
-                      <img
-                        src={image}
-                        alt="上传的图片"
-                        className="max-h-64 mx-auto rounded-lg object-contain"
-                      />
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        className="absolute top-2 right-2 h-8 w-8 p-0 rounded-full"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          clearImage()
-                        }}
-                      >
-                        <XCircle className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="py-6">
-                      <Upload className="w-12 h-12 mx-auto text-slate-500 mb-4" />
-                      <p className="text-slate-400 mb-2">
-                        拖拽图片到这里，或点击选择
-                      </p>
-                      <p className="text-slate-500 text-sm">
-                        支持 JPG、PNG、WebP，最大 10MB
-                      </p>
-                    </div>
-                  )}
+                {/* Image source toggle */}
+                <div className="flex items-center gap-2 mb-4">
+                  <Button
+                    variant={imageSource === 'upload' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setImageSource('upload')}
+                    className={imageSource === 'upload' ? 'bg-amber-500 hover:bg-amber-400 text-slate-950' : 'border-slate-600 text-slate-400 hover:text-slate-200'}
+                  >
+                    <Upload className="w-4 h-4 mr-1.5" />
+                    上传文件
+                  </Button>
+                  <Button
+                    variant={imageSource === 'url' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setImageSource('url')}
+                    className={imageSource === 'url' ? 'bg-amber-500 hover:bg-amber-400 text-slate-950' : 'border-slate-600 text-slate-400 hover:text-slate-200'}
+                  >
+                    <Link className="w-4 h-4 mr-1.5" />
+                    图片URL
+                  </Button>
                 </div>
+
+                {imageSource === 'upload' ? (
+                  /* Upload area */
+                  <div
+                    className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-all duration-300 cursor-pointer ${
+                      dragOver
+                        ? 'border-amber-400 bg-amber-500/5'
+                        : image
+                          ? 'border-slate-600 bg-slate-800/50'
+                          : 'border-slate-600 hover:border-amber-400/50 hover:bg-slate-800/30'
+                    }`}
+                    onDrop={handleDrop}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onClick={() => !image && fileInputRef.current?.click()}
+                  >
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0]
+                        if (file) handleFileSelect(file)
+                      }}
+                    />
+
+                    {image ? (
+                      <div className="relative">
+                        <img
+                          src={image}
+                          alt="上传的图片"
+                          className="max-h-64 mx-auto rounded-lg object-contain"
+                        />
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="absolute top-2 right-2 h-8 w-8 p-0 rounded-full"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            clearImage()
+                          }}
+                        >
+                          <XCircle className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="py-6">
+                        <Upload className="w-12 h-12 mx-auto text-slate-500 mb-4" />
+                        <p className="text-slate-400 mb-2">
+                          拖拽图片到这里，或点击选择
+                        </p>
+                        <p className="text-slate-500 text-sm">
+                          支持 JPG、PNG、WebP，最大 10MB
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  /* URL input area */
+                  <div className="space-y-3">
+                    <div className="flex gap-2">
+                      <input
+                        type="url"
+                        value={imageUrl}
+                        onChange={(e) => {
+                          setImageUrl(e.target.value)
+                          setResult(null)
+                        }}
+                        placeholder="输入图片URL，如 https://example.com/image.jpg"
+                        className="flex-1 rounded-lg border border-slate-600 bg-slate-900/50 px-3 py-2.5 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-amber-500 focus:border-amber-500"
+                      />
+                    </div>
+                    {imageUrl && (
+                      <div className="border border-slate-700/50 rounded-lg p-2 bg-slate-800/30">
+                        <img
+                          src={imageUrl}
+                          alt="URL预览"
+                          className="max-h-48 mx-auto rounded-lg object-contain"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none'
+                          }}
+                        />
+                      </div>
+                    )}
+                    <p className="text-slate-500 text-xs">
+                      支持任何可公开访问的图片URL
+                    </p>
+                  </div>
+                )}
 
                 {/* Family selector */}
                 <div className="mt-6">
@@ -330,7 +434,7 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
                 {/* Evaluate button */}
                 <Button
                   onClick={handleEvaluate}
-                  disabled={loading || !imageFile}
+                  disabled={loading || (imageSource === 'upload' ? !imageFile : !imageUrl.trim())}
                   className="w-full mt-6 bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold py-5 text-base rounded-xl shadow-lg shadow-amber-500/20 transition-all duration-300 hover:shadow-amber-500/30 disabled:opacity-50"
                 >
                   {loading ? (
@@ -411,6 +515,26 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
                           世代 Gen-{result.evolutionGeneration}
                           {result.ruleVersionUsed && ` · 规则 ${result.ruleVersionUsed}`}
                         </p>
+                      )}
+                      {/* Re-evaluation comparison badge */}
+                      {result.scoreDelta !== undefined && result.scoreDelta !== 0 && (
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.8 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          className="mt-2"
+                        >
+                          <Badge
+                            variant="outline"
+                            className={`text-xs ${
+                              result.scoreDelta > 0
+                                ? 'border-emerald-500/30 text-emerald-300 bg-emerald-500/5'
+                                : 'border-rose-500/30 text-rose-300 bg-rose-500/5'
+                            }`}
+                          >
+                            <ArrowUpDown className="w-3 h-3 mr-1" />
+                            较上次 {result.scoreDelta > 0 ? '+' : ''}{result.scoreDelta}
+                          </Badge>
+                        </motion.div>
                       )}
                     </div>
 
@@ -511,6 +635,39 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
                         </div>
                       </div>
                     )}
+
+                    {/* Re-evaluation comparison */}
+                    {result.comparisonWithPrevious && (
+                      <div className="bg-violet-500/5 border border-violet-500/20 rounded-lg p-4">
+                        <h4 className="text-sm font-medium text-violet-300 mb-2 flex items-center gap-2">
+                          <ArrowUpDown className="w-4 h-4" />
+                          与上次评估的对比
+                        </h4>
+                        <p className="text-sm text-slate-400 leading-relaxed">
+                          {result.comparisonWithPrevious}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Re-evaluate button */}
+                    <Button
+                      onClick={handleReevaluate}
+                      disabled={reevaluating || !result?.id}
+                      variant="outline"
+                      className="w-full border-violet-500/30 text-violet-400 hover:bg-violet-500/10 hover:text-violet-300 font-medium py-4 rounded-xl transition-all duration-300"
+                    >
+                      {reevaluating ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          重新评估中...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="w-4 h-4 mr-2" />
+                          用最新规则重新评估
+                        </>
+                      )}
+                    </Button>
 
                     {/* Human Feedback Section */}
                     <Separator className="bg-slate-700/50" />
@@ -629,7 +786,7 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
                     <ImageIcon className="w-16 h-16 text-slate-600 mb-4" />
                     <h3 className="text-slate-400 text-lg mb-2">等待评估</h3>
                     <p className="text-slate-500 text-sm max-w-xs">
-                      上传图片并点击评估按钮，即可获取域感知的审美分析结果
+                      上传图片或输入图片URL并点击评估按钮，即可获取域感知的审美分析结果
                     </p>
                   </div>
                 </CardContent>

@@ -18,6 +18,18 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Progress } from '@/components/ui/progress'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 import {
   Select,
   SelectContent,
@@ -145,6 +157,7 @@ export function RulesPanel() {
   const [families, setFamilies] = useState<FamilyOption[]>([])
   const [loading, setLoading] = useState(true)
   const [actingRuleId, setActingRuleId] = useState<string | null>(null)
+  const [expandedRuleId, setExpandedRuleId] = useState<string | null>(null)
 
   // Filters
   const [familyFilter, setFamilyFilter] = useState<string>('all')
@@ -243,7 +256,10 @@ export function RulesPanel() {
   // ---------------------------------------------------------------------------
   // Actions
   // ---------------------------------------------------------------------------
-  const handleAction = async (ruleId: string, action: 'promote' | 'deprecate' | 'delete') => {
+  // Confirm destructive action
+  const [confirmAction, setConfirmAction] = useState<{ ruleId: string; action: 'deprecate' | 'delete' } | null>(null)
+
+  const executeAction = async (ruleId: string, action: 'promote' | 'deprecate' | 'delete') => {
     setActingRuleId(ruleId)
     try {
       const res = await fetch('/api/rules', {
@@ -268,6 +284,14 @@ export function RulesPanel() {
       toast.error(err instanceof Error ? err.message : '操作失败，请重试')
     } finally {
       setActingRuleId(null)
+    }
+  }
+
+  const handleAction = (ruleId: string, action: 'promote' | 'deprecate' | 'delete') => {
+    if (action === 'deprecate' || action === 'delete') {
+      setConfirmAction({ ruleId, action })
+    } else {
+      executeAction(ruleId, action)
     }
   }
 
@@ -481,10 +505,15 @@ export function RulesPanel() {
 
                           {/* Content */}
                           <div className="flex-1 min-w-0">
-                            {/* Rule text */}
-                            <p className="font-semibold text-slate-100 text-sm leading-relaxed mb-2">
-                              {rule.ruleContent}
-                            </p>
+                            {/* Rule text - clickable to expand/collapse */}
+                            <button
+                              className="w-full text-left"
+                              onClick={() => setExpandedRuleId(expandedRuleId === rule.id ? null : rule.id)}
+                            >
+                              <p className={`font-semibold text-slate-100 text-sm leading-relaxed mb-2 ${expandedRuleId !== rule.id ? 'line-clamp-2' : ''}`}>
+                                {rule.ruleContent}
+                              </p>
+                            </button>
 
                             {/* Badges row */}
                             <div className="flex flex-wrap gap-1.5 mb-2">
@@ -549,6 +578,46 @@ export function RulesPanel() {
                                 支持 {rule.supportCount} / 反对 {rule.contradictCount}
                               </span>
                             </div>
+
+                            {/* Expanded details */}
+                            <AnimatePresence>
+                              {expandedRuleId === rule.id && (
+                                <motion.div
+                                  initial={{ opacity: 0, height: 0 }}
+                                  animate={{ opacity: 1, height: 'auto' }}
+                                  exit={{ opacity: 0, height: 0 }}
+                                  transition={{ duration: 0.2 }}
+                                  className="overflow-hidden"
+                                >
+                                  <div className="mt-3 p-3 rounded-lg bg-slate-800/50 border border-slate-700/30 space-y-2">
+                                    <div className="flex items-center gap-3 text-xs">
+                                      <span className="text-slate-500">来源</span>
+                                      <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${sourceConfig.color} ${sourceConfig.bg} ${sourceConfig.border} border`}>
+                                        {SOURCE_TYPE_LABELS[rule.sourceType] || rule.sourceType}
+                                      </Badge>
+                                      <span className="text-slate-500">创建</span>
+                                      <span className="text-slate-400">{new Date(rule.createdAt).toLocaleString('zh-CN')}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs text-slate-500 shrink-0">置信度</span>
+                                      <Progress
+                                        value={rule.confidence * 100}
+                                        className="h-1.5 flex-1 bg-slate-700/50 [&>div]:bg-amber-500"
+                                      />
+                                      <span className="text-xs text-amber-400 font-medium">{(rule.confidence * 100).toFixed(0)}%</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs text-slate-500 shrink-0">优先级</span>
+                                      <Progress
+                                        value={rule.priority * 100}
+                                        className="h-1.5 flex-1 bg-slate-700/50 [&>div]:bg-violet-500"
+                                      />
+                                      <span className="text-xs text-violet-400 font-medium">{(rule.priority * 100).toFixed(0)}%</span>
+                                    </div>
+                                  </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
                           </div>
 
                           {/* Action buttons */}
@@ -627,6 +696,43 @@ export function RulesPanel() {
           </Card>
         </motion.div>
       </div>
+
+      {/* Confirmation Dialog for destructive actions */}
+      <AlertDialog
+        open={confirmAction !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmAction(null)
+        }}
+      >
+        <AlertDialogContent className="bg-slate-900 border-slate-700 text-slate-200">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-slate-100">
+              {confirmAction?.action === 'deprecate' ? '确认废弃规则' : '确认删除规则'}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-400">
+              {confirmAction?.action === 'deprecate'
+                ? '废弃后该规则将不再参与评估，但仍保留在历史记录中。你可以之后恢复它。'
+                : '删除后该规则将永久移除，无法恢复。'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="bg-slate-800 border-slate-600 text-slate-300 hover:bg-slate-700">
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (confirmAction) {
+                  executeAction(confirmAction.ruleId, confirmAction.action)
+                  setConfirmAction(null)
+                }
+              }}
+              className={confirmAction?.action === 'delete' ? 'bg-rose-600 hover:bg-rose-500 text-white' : 'bg-amber-600 hover:bg-amber-500 text-white'}
+            >
+              确认{confirmAction?.action === 'deprecate' ? '废弃' : '删除'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   )
 }

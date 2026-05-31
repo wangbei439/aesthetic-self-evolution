@@ -33,7 +33,7 @@ export function Footer() {
               <Github className="w-5 h-5" />
             </a>
             <span className="text-xs text-slate-600">
-              © 2024 Aesthetic Self-Evolution
+              © 2025 Aesthetic Self-Evolution
             </span>
           </div>
         </div>

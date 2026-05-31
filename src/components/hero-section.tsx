@@ -21,7 +21,7 @@ export function HeroSection({ onScrollToEvaluator }: { onScrollToEvaluator: () =
         transition={{ duration: 12, repeat: Infinity, ease: 'easeInOut' }}
       />
       <motion.div
-        className="absolute bottom-1/4 right-1/4 w-80 h-80 rounded-full bg-orange-500/8 blur-[100px]"
+        className="absolute bottom-1/4 right-1/4 w-80 h-80 rounded-full bg-orange-500/10 blur-[100px]"
         animate={{
           x: [0, -60, 40, 0],
           y: [0, 40, -60, 0],
@@ -30,7 +30,7 @@ export function HeroSection({ onScrollToEvaluator }: { onScrollToEvaluator: () =
         transition={{ duration: 15, repeat: Infinity, ease: 'easeInOut' }}
       />
       <motion.div
-        className="absolute top-1/2 right-1/3 w-64 h-64 rounded-full bg-amber-400/6 blur-[80px]"
+        className="absolute top-1/2 right-1/3 w-64 h-64 rounded-full bg-amber-400/10 blur-[80px]"
         animate={{
           x: [0, 50, -30, 0],
           y: [0, -40, 30, 0],
