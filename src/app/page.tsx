@@ -8,6 +8,7 @@ import { EvaluatorSection } from '@/components/evaluator-section'
 import { EvolutionDashboard } from '@/components/evolution-dashboard'
 import { EvolutionLineage } from '@/components/evolution-lineage'
 import { RulesPanel } from '@/components/rules-panel'
+import { AutoEvolutionPanel } from '@/components/auto-evolution-panel'
 import { ScoreTrendChart } from '@/components/score-trend-chart'
 import { ArchitectureSection } from '@/components/architecture-section'
 import { Footer } from '@/components/footer'
@@ -53,6 +54,11 @@ export default function Home() {
         </div>
       </section>
       <RulesPanel />
+      <section className="relative py-24 px-4" id="auto-evolve">
+        <div className="max-w-6xl mx-auto">
+          <AutoEvolutionPanel />
+        </div>
+      </section>
       <ArchitectureSection />
       <Footer />
     </div>

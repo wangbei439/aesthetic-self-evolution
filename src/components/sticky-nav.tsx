@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Menu, X, Sparkles, Eye, Layers, Scale, Dna, Brain, TrendingUp, GitBranch } from 'lucide-react'
+import { Menu, X, Sparkles, Eye, Layers, Scale, Dna, Brain, TrendingUp, GitBranch, Zap } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { LucideIcon } from 'lucide-react'
 
@@ -23,6 +23,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: '进化', href: '#evolution', icon: Layers },
   { label: '谱系', href: '#lineage', icon: GitBranch },
   { label: '法则库', href: '#rules', icon: Scale },
+  { label: '自动进化', href: '#auto-evolve', icon: Zap },
   { label: '架构', href: '#architecture', icon: Dna },
 ]
 

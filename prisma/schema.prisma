@@ -87,10 +87,106 @@ model EvolutionEvent {
   id          String   @id @default(cuid())
   familyId    String?             // 关联的家族（null表示跨家族事件）
 
-  eventType   String              // reflection | rule_created | rule_modified | rule_deprecated | transfer_attempt | transfer_success | transfer_failed
+  eventType   String              // reflection | rule_created | rule_modified | rule_deprecated | rule_promoted | transfer_attempt | transfer_success | transfer_failed | crawl_discovered | crawl_evaluated | auto_evolve
   description String              // 事件描述
   metadata    String?             // JSON: 事件相关数据
 
   generation  Int @default(1)     // 第几代
   createdAt   DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// 自动爬取 & 自进化相关模型
+// ---------------------------------------------------------------------------
+
+// 爬取数据源：配置从哪里获取审美训练数据
+model CrawlSource {
+  id          String   @id @default(cuid())
+  name        String             // 数据源名称
+  type        String             // search | gallery | rss | custom
+  familyKey   String?            // 关联的审美家族key（null表示全家族通用）
+  
+  // 搜索配置
+  query       String?            // Web Search 搜索关键词
+  targetUrls  String?            // JSON: 目标网站URL列表
+  maxItems    Int @default(10)   // 每次爬取最大条目数
+  
+  // 状态
+  status      String @default("active")   // active | paused | error
+  lastCrawledAt DateTime?         // 上次爬取时间
+  totalFound   Int @default(0)    // 累计发现条目数
+  totalEvaluated Int @default(0)  // 累计评估条目数
+  
+  // 配置
+  config      String?            // JSON: 额外配置（如过滤条件、语言偏好等）
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tasks       CrawlTask[]
+  items       CrawledItem[]
+}
+
+// 爬取任务：每次执行爬取的记录
+model CrawlTask {
+  id          String   @id @default(cuid())
+  sourceId    String
+  source      CrawlSource @relation(fields: [sourceId], references: [id])
+  
+  status      String @default("pending")  // pending | running | completed | failed
+  startedAt   DateTime?
+  completedAt DateTime?
+  
+  // 执行结果
+  itemsFound     Int @default(0)      // 发现的条目数
+  itemsEvaluated Int @default(0)      // 成功评估的条目数
+  itemsSkipped   Int @default(0)      // 跳过的条目数（重复、无效等）
+  itemsFailed    Int @default(0)      // 评估失败的条目数
+  
+  // 错误信息
+  error       String?            // 错误描述
+  
+  // 触发方式
+  trigger     String @default("manual")  // manual | scheduled | auto_evolve
+  
+  // 进化结果（如果触发了自动进化）
+  evolutionTriggered Boolean @default(false) // 是否触发了进化
+  rulesCreated       Int @default(0)         // 进化产生的新规则数
+  rulesDeprecated    Int @default(0)         // 进化废弃的规则数
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items       CrawledItem[]
+}
+
+// 爬取条目：发现的图片/内容
+model CrawledItem {
+  id          String   @id @default(cuid())
+  sourceId    String?
+  source      CrawlSource? @relation(fields: [sourceId], references: [id])
+  taskId      String?
+  task        CrawlTask? @relation(fields: [taskId], references: [id])
+  
+  // 内容信息
+  imageUrl    String             // 图片URL
+  title       String?            // 页面/图片标题
+  sourceUrl   String?            // 来源页面URL
+  description String?            // 内容描述
+  
+  // 分类结果
+  familyKey   String?            // 自动分类到的家族
+  familyId    String?            // 关联家族ID
+  classificationConfidence Float @default(0)
+  
+  // 评估状态
+  evaluationStatus String @default("pending")  // pending | evaluating | evaluated | failed | skipped
+  evaluationId String?            // 关联的评估ID
+  overallScore Float?             // 评估得分
+  
+  // 去重
+  imageHash   String?            // 图片hash，用于去重
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
