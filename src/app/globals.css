@@ -120,3 +120,30 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Custom scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 3px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.35);
+}
+
+/* Smooth scroll */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Prose overrides for dark mode */
+.dark .prose-invert {
+  --tw-prose-body: theme(--color-slate-400);
+  --tw-prose-headings: theme(--color-slate-200);
+  --tw-prose-links: theme(--color-amber-400);
+}

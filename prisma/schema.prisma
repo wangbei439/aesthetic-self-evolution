@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -13,20 +7,90 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+// 审美家族：6大域分割
+model AestheticFamily {
+  id          String   @id @default(cuid())
+  key         String   @unique   // narrative_visual, interactive_ui, spatial, character, graphic_composition, dynamic_rhythm
+  name        String             // 叙事视觉, 交互界面, 空间营造, 人物造型, 平面构成, 动态韵律
+  description String             // 家族描述
+  icon        String             // Lucide icon name
+  color       String             // 代表色 (Tailwind color class)
+  criteria    String             // JSON: 该家族的审美评价维度定义
+  domains     String             // JSON: 包含的域列表
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  evaluations AestheticEvaluation[]
+  rules       AestheticRule[]
 }
 
-model Post {
-  id        String   @id @default(cuid())
-  title     String
-  content   String?
-  published Boolean  @default(false)
-  authorId  String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+// 审美评估记录
+model AestheticEvaluation {
+  id          String   @id @default(cuid())
+  familyId    String
+  family      AestheticFamily @relation(fields: [familyId], references: [id])
+
+  imageUrl    String             // 被评估的图片URL或base64
+  imageHash   String?            // 图片hash，用于去重
+
+  // 域分类结果
+  detectedDomain String?         // 检测到的具体域
+  domainConfidence Float @default(0) // 域检测置信度
+
+  // 评估结果 (JSON)
+  overallScore   Float @default(0)   // 总分 0-10
+  dimensionScores String            // JSON: 各维度评分 {composition: 8, color: 7, ...}
+  evaluation      String            // 自然语言评估
+  suggestions     String            // JSON: 改进建议列表
+  strengths       String            // JSON: 优点列表
+  weaknesses      String            // JSON: 不足列表
+
+  // 进化相关
+  evolutionGeneration Int @default(1)  // 第几代评估
+  ruleVersionUsed     String?          // 使用的法则版本
+  humanFeedback       String?          // JSON: 人工反馈
+  humanScoreOverride  Float?           // 人工修正分数
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// 审美法则：每个家族的进化法则库
+model AestheticRule {
+  id          String   @id @default(cuid())
+  familyId    String
+  family      AestheticFamily @relation(fields: [familyId], references: [id])
+
+  ruleContent String             // 法则内容（自然语言描述）
+  ruleType    String             // positive | negative | conditional
+  dimension   String?            // 关联的审美维度
+  priority    Float @default(0.5) // 优先级/权重 0-1
+
+  // 进化追踪
+  generation  Int @default(1)    // 第几代法则
+  parentId    String?            // 父法则ID（进化来源）
+  sourceType  String @default("seed") // seed | evolved | human | transferred
+  sourceFamilyId String?         // 如果是跨家族迁移，来源家族ID
+
+  // 验证状态
+  supportCount    Int @default(0)    // 支持该法则的评估次数
+  contradictCount Int @default(0)    // 反对该法则的评估次数
+  confidence      Float @default(0.5) // 置信度
+  status          String @default("active") // active | deprecated | candidate
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// 进化事件：追踪进化循环的每一步
+model EvolutionEvent {
+  id          String   @id @default(cuid())
+  familyId    String?             // 关联的家族（null表示跨家族事件）
+
+  eventType   String              // reflection | rule_created | rule_modified | rule_deprecated | transfer_attempt | transfer_success | transfer_failed
+  description String              // 事件描述
+  metadata    String?             // JSON: 事件相关数据
+
+  generation  Int @default(1)     // 第几代
+  createdAt   DateTime @default(now())
 }
