@@ -4,10 +4,13 @@ import { db } from "@/lib/db";
 // ---------------------------------------------------------------------------
 // GET /api/rules — List rules with filtering and pagination
 // Query params:
-//   familyKey (optional) — filter by family key
-//   status    (optional) — filter by status (active, candidate, deprecated)
-//   limit     (optional) — page size, default 20, max 100
-//   offset    (optional) — skip count, default 0
+//   familyKey  (optional) — filter by family key
+//   status     (optional) — filter by status (active, candidate, deprecated)
+//   ruleType   (optional) — filter by rule type (positive, negative, conditional)
+//   sourceType (optional) — filter by source type (seed, evolved, human, transferred)
+//   search     (optional) — search rule content (case-insensitive contains)
+//   limit      (optional) — page size, default 20, max 100
+//   offset     (optional) — skip count, default 0
 // ---------------------------------------------------------------------------
 export async function GET(request: Request) {
   try {
@@ -15,6 +18,9 @@ export async function GET(request: Request) {
 
     const familyKey = searchParams.get("familyKey");
     const status = searchParams.get("status");
+    const ruleType = searchParams.get("ruleType");
+    const sourceType = searchParams.get("sourceType");
+    const search = searchParams.get("search");
     const limitParam = searchParams.get("limit");
     const offsetParam = searchParams.get("offset");
 
@@ -36,11 +42,45 @@ export async function GET(request: Request) {
       );
     }
 
+    // Validate ruleType if provided
+    if (ruleType && !["positive", "negative", "conditional"].includes(ruleType)) {
+      return NextResponse.json(
+        {
+          error:
+            "Invalid ruleType filter. Must be one of: positive, negative, conditional",
+        },
+        { status: 400 }
+      );
+    }
+
+    // Validate sourceType if provided
+    if (sourceType && !["seed", "evolved", "human", "transferred"].includes(sourceType)) {
+      return NextResponse.json(
+        {
+          error:
+            "Invalid sourceType filter. Must be one of: seed, evolved, human, transferred",
+        },
+        { status: 400 }
+      );
+    }
+
     // Build where clause
     const where: Record<string, unknown> = {};
 
     if (status) {
       where.status = status;
+    }
+
+    if (ruleType) {
+      where.ruleType = ruleType;
+    }
+
+    if (sourceType) {
+      where.sourceType = sourceType;
+    }
+
+    if (search) {
+      where.ruleContent = { contains: search };
     }
 
     if (familyKey) {
@@ -121,12 +161,12 @@ export async function GET(request: Request) {
 // PATCH /api/rules — Manage rule lifecycle
 // Body: {
 //   ruleId: string
-//   action: "promote" | "deprecate" | "delete"
+//   action: "promote" | "deprecate" | "delete" | "restore"
 // }
 // ---------------------------------------------------------------------------
 interface RuleActionBody {
   ruleId: string;
-  action: "promote" | "deprecate" | "delete";
+  action: "promote" | "deprecate" | "delete" | "restore";
 }
 
 export async function PATCH(request: Request) {
@@ -140,7 +180,7 @@ export async function PATCH(request: Request) {
       );
     }
 
-    const validActions = ["promote", "deprecate", "delete"];
+    const validActions = ["promote", "deprecate", "delete", "restore"];
     if (!validActions.includes(body.action)) {
       return NextResponse.json(
         {
@@ -256,6 +296,54 @@ export async function PATCH(request: Request) {
 
         return NextResponse.json({
           message: `Rule deprecated (was ${rule.status})`,
+          rule: {
+            id: updatedRule.id,
+            ruleContent: updatedRule.ruleContent,
+            ruleType: updatedRule.ruleType,
+            status: updatedRule.status,
+            confidence: updatedRule.confidence,
+            family: rule.family,
+          },
+        });
+      }
+
+      case "restore": {
+        // Only deprecated rules can be restored
+        if (rule.status !== "deprecated") {
+          return NextResponse.json(
+            {
+              error: `Cannot restore rule with status '${rule.status}'. Only 'deprecated' rules can be restored.`,
+              currentStatus: rule.status,
+            },
+            { status: 400 }
+          );
+        }
+
+        const updatedRule = await db.aestheticRule.update({
+          where: { id: body.ruleId },
+          data: {
+            status: "candidate",
+          },
+        });
+
+        // Create evolution event for restore
+        await db.evolutionEvent.create({
+          data: {
+            familyId: rule.familyId,
+            eventType: "rule_created",
+            description: `Deprecated rule restored to candidate: "${rule.ruleContent}"`,
+            metadata: JSON.stringify({
+              ruleId: rule.id,
+              action: "restore",
+              previousStatus: "deprecated",
+              previousConfidence: rule.confidence,
+            }),
+            generation: rule.generation,
+          },
+        });
+
+        return NextResponse.json({
+          message: "Rule restored from deprecated to candidate",
           rule: {
             id: updatedRule.id,
             ruleContent: updatedRule.ruleContent,

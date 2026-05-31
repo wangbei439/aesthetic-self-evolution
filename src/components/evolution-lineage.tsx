@@ -16,10 +16,29 @@ import {
   ChevronDown,
   ChevronRight,
   Dna,
+  RefreshCw,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Button } from '@/components/ui/button'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  FAMILY_COLORS,
+  FAMILY_BG,
+  FAMILY_BORDER,
+  FAMILY_DOT,
+  FAMILY_RING,
+  FAMILY_GLOW,
+  FAMILY_NAMES,
+  EVENT_TYPE_CONFIG,
+} from '@/lib/family-constants'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -67,129 +86,47 @@ interface FamilyEvolutionStats {
 }
 
 // ---------------------------------------------------------------------------
-// Constants
+// Local icon mapping (not in shared constants since icons are React components)
 // ---------------------------------------------------------------------------
 
-const FAMILY_COLORS: Record<string, string> = {
-  narrative_visual: 'text-orange-400',
-  interactive_ui: 'text-emerald-400',
-  spatial: 'text-violet-400',
-  character: 'text-rose-400',
-  graphic_composition: 'text-cyan-400',
-  dynamic_rhythm: 'text-amber-400',
+const EVENT_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  reflection: Brain,
+  rule_created: Sparkles,
+  rule_modified: Wrench,
+  rule_deprecated: XCircle,
+  transfer_attempt: ArrowRight,
+  transfer_success: CheckCircle,
+  transfer_failed: AlertTriangle,
+  rule_promoted: ArrowUp,
 }
 
-const FAMILY_BG: Record<string, string> = {
-  narrative_visual: 'bg-orange-500/10',
-  interactive_ui: 'bg-emerald-500/10',
-  spatial: 'bg-violet-500/10',
-  character: 'bg-rose-500/10',
-  graphic_composition: 'bg-cyan-500/10',
-  dynamic_rhythm: 'bg-amber-500/10',
-}
+// ---------------------------------------------------------------------------
+// Metadata key Chinese labels
+// ---------------------------------------------------------------------------
 
-const FAMILY_BORDER: Record<string, string> = {
-  narrative_visual: 'border-orange-500/30',
-  interactive_ui: 'border-emerald-500/30',
-  spatial: 'border-violet-500/30',
-  character: 'border-rose-500/30',
-  graphic_composition: 'border-cyan-500/30',
-  dynamic_rhythm: 'border-amber-500/30',
-}
-
-const FAMILY_DOT: Record<string, string> = {
-  narrative_visual: 'bg-orange-400',
-  interactive_ui: 'bg-emerald-400',
-  spatial: 'bg-violet-400',
-  character: 'bg-rose-400',
-  graphic_composition: 'bg-cyan-400',
-  dynamic_rhythm: 'bg-amber-400',
-}
-
-const FAMILY_RING: Record<string, string> = {
-  narrative_visual: 'ring-orange-400/30',
-  interactive_ui: 'ring-emerald-400/30',
-  spatial: 'ring-violet-400/30',
-  character: 'ring-rose-400/30',
-  graphic_composition: 'ring-cyan-400/30',
-  dynamic_rhythm: 'ring-amber-400/30',
-}
-
-const FAMILY_GLOW: Record<string, string> = {
-  narrative_visual: 'shadow-orange-500/20',
-  interactive_ui: 'shadow-emerald-500/20',
-  spatial: 'shadow-violet-500/20',
-  character: 'shadow-rose-500/20',
-  graphic_composition: 'shadow-cyan-500/20',
-  dynamic_rhythm: 'shadow-amber-500/20',
-}
-
-// Event type config: icon + color
-type EventTypeConfig = {
-  icon: React.ComponentType<{ className?: string }>
-  color: string
-  bg: string
-  border: string
-  label: string
-}
-
-const EVENT_TYPE_CONFIG: Record<string, EventTypeConfig> = {
-  reflection: {
-    icon: Brain,
-    color: 'text-amber-400',
-    bg: 'bg-amber-500/10',
-    border: 'border-amber-500/20',
-    label: '反思',
-  },
-  rule_created: {
-    icon: Sparkles,
-    color: 'text-emerald-400',
-    bg: 'bg-emerald-500/10',
-    border: 'border-emerald-500/20',
-    label: '规则创建',
-  },
-  rule_modified: {
-    icon: Wrench,
-    color: 'text-cyan-400',
-    bg: 'bg-cyan-500/10',
-    border: 'border-cyan-500/20',
-    label: '规则修改',
-  },
-  rule_deprecated: {
-    icon: XCircle,
-    color: 'text-rose-400',
-    bg: 'bg-rose-500/10',
-    border: 'border-rose-500/20',
-    label: '规则废弃',
-  },
-  transfer_attempt: {
-    icon: ArrowRight,
-    color: 'text-orange-400',
-    bg: 'bg-orange-500/10',
-    border: 'border-orange-500/20',
-    label: '迁移尝试',
-  },
-  transfer_success: {
-    icon: CheckCircle,
-    color: 'text-violet-400',
-    bg: 'bg-violet-500/10',
-    border: 'border-violet-500/20',
-    label: '迁移成功',
-  },
-  transfer_failed: {
-    icon: AlertTriangle,
-    color: 'text-rose-400',
-    bg: 'bg-rose-500/10',
-    border: 'border-rose-500/20',
-    label: '迁移失败',
-  },
-  rule_promoted: {
-    icon: ArrowUp,
-    color: 'text-emerald-400',
-    bg: 'bg-emerald-500/10',
-    border: 'border-emerald-500/20',
-    label: '规则晋升',
-  },
+const METADATA_KEY_LABELS: Record<string, string> = {
+  ruleId: '规则ID',
+  action: '操作',
+  previousStatus: '原状态',
+  previousConfidence: '原置信度',
+  newConfidence: '新置信度',
+  supportCount: '支持次数',
+  contradictCount: '反对次数',
+  confidence: '置信度',
+  ruleContent: '规则内容',
+  ruleType: '规则类型',
+  evaluationCount: '评估数量',
+  highScoringCount: '高分数量',
+  lowScoringCount: '低分数量',
+  parentId: '父规则',
+  dimension: '维度',
+  priority: '优先级',
+  originalRule: '原始规则',
+  adaptedRule: '适配规则',
+  sourceFamilyId: '来源家族',
+  count: '数量',
+  sources: '来源',
+  rawResponse: '原始响应',
 }
 
 // ---------------------------------------------------------------------------
@@ -226,7 +163,9 @@ function MetadataViewer({ metadata }: { metadata: Record<string, unknown> | null
     <div className="mt-2 p-2.5 rounded-lg bg-slate-800/60 border border-slate-700/40 text-xs space-y-1.5">
       {entries.map(([key, value]) => (
         <div key={key} className="flex gap-2">
-          <span className="text-slate-500 font-mono shrink-0 min-w-[80px]">{key}</span>
+          <span className="text-slate-400 shrink-0 min-w-[80px]">
+            {METADATA_KEY_LABELS[key] || key}
+          </span>
           <span className="text-slate-300 font-mono break-all">
             {typeof value === 'object' && value !== null
               ? JSON.stringify(value, null, 0)
@@ -251,7 +190,7 @@ function TimelineEventItem({
 }) {
   const [expanded, setExpanded] = useState(false)
   const config = EVENT_TYPE_CONFIG[event.eventType] || EVENT_TYPE_CONFIG.reflection
-  const Icon = config.icon
+  const Icon = EVENT_ICONS[event.eventType] || Brain
   const familyColor = FAMILY_COLORS[event.familyKey] || 'text-slate-400'
   const familyBg = FAMILY_BG[event.familyKey] || 'bg-slate-700/30'
   const familyDot = FAMILY_DOT[event.familyKey] || 'bg-slate-500'
@@ -409,6 +348,8 @@ export function EvolutionLineage() {
   const [events, setEvents] = useState<EvolutionEvent[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [familyFilter, setFamilyFilter] = useState<string>('all')
+  const [refreshing, setRefreshing] = useState(false)
 
   const fetchEvents = useCallback(async () => {
     try {
@@ -443,11 +384,22 @@ export function EvolutionLineage() {
     }
   }, [])
 
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true)
+    await fetchEvents()
+    setRefreshing(false)
+  }, [fetchEvents])
+
   useEffect(() => {
     fetchEvents()
   }, [fetchEvents])
 
-  const generationGroups = groupByGeneration(events)
+  // Filter events by family
+  const filteredEvents = familyFilter === 'all'
+    ? events
+    : events.filter((e) => e.familyKey === familyFilter)
+
+  const generationGroups = groupByGeneration(filteredEvents)
 
   // ---------------------------------------------------------------------------
   // Loading state
@@ -547,21 +499,52 @@ export function EvolutionLineage() {
           <Dna className="w-5 h-5 text-amber-400" />
           进化谱系
           <Badge variant="outline" className="ml-2 text-[11px] px-2 py-0.5 border-slate-600 text-slate-400">
-            {events.length} 个事件
+            {filteredEvents.length} 个事件
           </Badge>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="ml-1 h-6 w-6 text-slate-500 hover:text-amber-400"
+            onClick={handleRefresh}
+            disabled={refreshing}
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+          </Button>
         </CardTitle>
+        {/* Family filter */}
+        <div className="mt-2">
+          <Select value={familyFilter} onValueChange={setFamilyFilter}>
+            <SelectTrigger className="w-48 h-8 text-xs bg-slate-800/50 border-slate-700/50 text-slate-300">
+              <SelectValue placeholder="筛选家族" />
+            </SelectTrigger>
+            <SelectContent className="bg-slate-800 border-slate-700">
+              <SelectItem value="all" className="text-slate-300 text-xs">全部家族</SelectItem>
+              {Object.entries(FAMILY_NAMES).map(([key, name]) => (
+                <SelectItem key={key} value={key} className="text-xs">
+                  <span className={FAMILY_COLORS[key]}>{name}</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </CardHeader>
       <CardContent>
-        <div className="max-h-[600px] overflow-y-auto custom-scrollbar pr-1 space-y-6">
-          {Array.from(generationGroups.entries()).map(([generation, genEvents], groupIndex) => (
-            <GenerationGroup
-              key={generation}
-              generation={generation}
-              events={genEvents}
-              groupIndex={groupIndex}
-            />
-          ))}
-        </div>
+        {filteredEvents.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 text-slate-500">
+            <p className="text-sm">该家族暂无进化事件</p>
+          </div>
+        ) : (
+          <div className="max-h-[600px] overflow-y-auto custom-scrollbar pr-1 space-y-6">
+            {Array.from(generationGroups.entries()).map(([generation, genEvents], groupIndex) => (
+              <GenerationGroup
+                key={generation}
+                generation={generation}
+                events={genEvents}
+                groupIndex={groupIndex}
+              />
+            ))}
+          </div>
+        )}
 
         {/* Family legend */}
         <div className="mt-4 pt-4 border-t border-slate-700/30">
@@ -576,12 +559,7 @@ export function EvolutionLineage() {
                 <div key={key} className="flex items-center gap-1.5">
                   <div className={`w-2.5 h-2.5 rounded-full ${dot}`} />
                   <span className={`text-[11px] ${color}`}>
-                    {key === 'narrative_visual' ? '叙事视觉' :
-                     key === 'interactive_ui' ? '交互界面' :
-                     key === 'spatial' ? '空间构成' :
-                     key === 'character' ? '角色表现' :
-                     key === 'graphic_composition' ? '图形构成' :
-                     key === 'dynamic_rhythm' ? '动态节奏' : key}
+                    {FAMILY_NAMES[key] || key}
                   </span>
                 </div>
               )

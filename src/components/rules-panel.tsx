@@ -6,6 +6,7 @@ import {
   Scale,
   Shield,
   ArrowUp,
+  RotateCcw,
   Trash2,
   Filter,
   BookOpen,
@@ -13,12 +14,16 @@ import {
   CheckCircle2,
   AlertCircle,
   XCircle,
+  Search,
+  Link2,
+  ChevronDown,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Progress } from '@/components/ui/progress'
+import { Input } from '@/components/ui/input'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -38,6 +43,17 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { toast } from 'sonner'
+
+// Shared constants — single source of truth
+import {
+  FAMILY_COLORS,
+  FAMILY_DOT,
+  FAMILY_BG,
+  RULE_TYPE_CONFIG,
+  STATUS_CONFIG,
+  SOURCE_TYPE_LABELS,
+  SOURCE_TYPE_COLORS,
+} from '@/lib/family-constants'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -83,61 +99,8 @@ interface FamilyOption {
 }
 
 // ---------------------------------------------------------------------------
-// Constants
+// Fallback families
 // ---------------------------------------------------------------------------
-
-const FAMILY_COLORS: Record<string, string> = {
-  narrative_visual: 'text-orange-400',
-  interactive_ui: 'text-emerald-400',
-  spatial: 'text-violet-400',
-  character: 'text-rose-400',
-  graphic_composition: 'text-cyan-400',
-  dynamic_rhythm: 'text-amber-400',
-}
-
-const FAMILY_DOT: Record<string, string> = {
-  narrative_visual: 'bg-orange-400',
-  interactive_ui: 'bg-emerald-400',
-  spatial: 'bg-violet-400',
-  character: 'bg-rose-400',
-  graphic_composition: 'bg-cyan-400',
-  dynamic_rhythm: 'bg-amber-400',
-}
-
-const FAMILY_BG: Record<string, string> = {
-  narrative_visual: 'bg-orange-500/10',
-  interactive_ui: 'bg-emerald-500/10',
-  spatial: 'bg-violet-500/10',
-  character: 'bg-rose-500/10',
-  graphic_composition: 'bg-cyan-500/10',
-  dynamic_rhythm: 'bg-amber-500/10',
-}
-
-const RULE_TYPE_CONFIG: Record<string, { label: string; symbol: string; color: string; bg: string; border: string }> = {
-  positive: { label: '正面', symbol: '+', color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20' },
-  negative: { label: '负面', symbol: '-', color: 'text-rose-400', bg: 'bg-rose-500/10', border: 'border-rose-500/20' },
-  conditional: { label: '条件', symbol: '?', color: 'text-violet-400', bg: 'bg-violet-500/10', border: 'border-violet-500/20' },
-}
-
-const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; border: string; icon: typeof CheckCircle2 }> = {
-  active: { label: '活跃', color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', icon: CheckCircle2 },
-  candidate: { label: '候选', color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20', icon: AlertCircle },
-  deprecated: { label: '已废弃', color: 'text-slate-400', bg: 'bg-slate-500/10', border: 'border-slate-500/20', icon: XCircle },
-}
-
-const SOURCE_TYPE_LABELS: Record<string, string> = {
-  seed: '种子规则',
-  evolved: '进化规则',
-  human: '人工规则',
-  transferred: '迁移规则',
-}
-
-const SOURCE_TYPE_COLORS: Record<string, { color: string; bg: string; border: string }> = {
-  seed: { color: 'text-cyan-400', bg: 'bg-cyan-500/10', border: 'border-cyan-500/20' },
-  evolved: { color: 'text-violet-400', bg: 'bg-violet-500/10', border: 'border-violet-500/20' },
-  human: { color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20' },
-  transferred: { color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20' },
-}
 
 const FALLBACK_FAMILIES: FamilyOption[] = [
   { key: 'narrative_visual', name: '叙事视觉', color: 'orange' },
@@ -149,6 +112,11 @@ const FALLBACK_FAMILIES: FamilyOption[] = [
 ]
 
 // ---------------------------------------------------------------------------
+// Page size for "Load More" pagination
+// ---------------------------------------------------------------------------
+const PAGE_SIZE = 20
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -156,12 +124,21 @@ export function RulesPanel() {
   const [rules, setRules] = useState<Rule[]>([])
   const [families, setFamilies] = useState<FamilyOption[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [actingRuleId, setActingRuleId] = useState<string | null>(null)
   const [expandedRuleId, setExpandedRuleId] = useState<string | null>(null)
 
   // Filters
   const [familyFilter, setFamilyFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [ruleTypeFilter, setRuleTypeFilter] = useState<string>('all')
+  const [sourceTypeFilter, setSourceTypeFilter] = useState<string>('all')
+  const [searchQuery, setSearchQuery] = useState<string>('')
+  const [searchInput, setSearchInput] = useState<string>('')
+
+  // Pagination
+  const [offset, setOffset] = useState(0)
+  const [hasMore, setHasMore] = useState(false)
 
   // Stats
   const [activeCount, setActiveCount] = useState(0)
@@ -196,24 +173,40 @@ export function RulesPanel() {
   }, [])
 
   // ---------------------------------------------------------------------------
-  // Fetch rules + stats
+  // Build query params helper
+  // ---------------------------------------------------------------------------
+  const buildQueryParams = useCallback(
+    (limit: number, currentOffset: number, includeSearch = true) => {
+      const params = new URLSearchParams()
+      params.set('limit', String(limit))
+      params.set('offset', String(currentOffset))
+      if (familyFilter !== 'all') params.set('familyKey', familyFilter)
+      if (statusFilter !== 'all') params.set('status', statusFilter)
+      if (ruleTypeFilter !== 'all') params.set('ruleType', ruleTypeFilter)
+      if (sourceTypeFilter !== 'all') params.set('sourceType', sourceTypeFilter)
+      if (includeSearch && searchQuery) params.set('search', searchQuery)
+      return params
+    },
+    [familyFilter, statusFilter, ruleTypeFilter, sourceTypeFilter, searchQuery]
+  )
+
+  // ---------------------------------------------------------------------------
+  // Fetch rules (initial / filter change) — resets list
   // ---------------------------------------------------------------------------
   const fetchRules = useCallback(async () => {
     setLoading(true)
     try {
-      // Fetch rules for current filter
-      const params = new URLSearchParams()
-      params.set('limit', '50')
-      params.set('offset', '0')
-      if (familyFilter !== 'all') params.set('familyKey', familyFilter)
-      if (statusFilter !== 'all') params.set('status', statusFilter)
-
+      const params = buildQueryParams(PAGE_SIZE, 0)
       const res = await fetch(`/api/rules?${params.toString()}`)
       if (res.ok) {
         const data: RulesResponse = await res.json()
         setRules(data.rules || [])
+        setOffset(PAGE_SIZE)
+        setHasMore(data.pagination?.hasMore ?? false)
       } else {
         setRules([])
+        setOffset(0)
+        setHasMore(false)
       }
 
       // Fetch counts for stats (all statuses, same family filter)
@@ -237,14 +230,41 @@ export function RulesPanel() {
       }
     } catch {
       setRules([])
+      setOffset(0)
+      setHasMore(false)
       setActiveCount(0)
       setCandidateCount(0)
       setDeprecatedCount(0)
     } finally {
       setLoading(false)
     }
-  }, [familyFilter, statusFilter])
+  }, [buildQueryParams, familyFilter])
 
+  // ---------------------------------------------------------------------------
+  // Load more rules — appends to existing list
+  // ---------------------------------------------------------------------------
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore) return
+    setLoadingMore(true)
+    try {
+      const params = buildQueryParams(PAGE_SIZE, offset)
+      const res = await fetch(`/api/rules?${params.toString()}`)
+      if (res.ok) {
+        const data: RulesResponse = await res.json()
+        setRules((prev) => [...prev, ...(data.rules || [])])
+        setOffset((prev) => prev + PAGE_SIZE)
+        setHasMore(data.pagination?.hasMore ?? false)
+      }
+    } catch {
+      toast.error('加载更多规则失败')
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [buildQueryParams, offset, hasMore, loadingMore])
+
+  // ---------------------------------------------------------------------------
+  // Effects
+  // ---------------------------------------------------------------------------
   useEffect(() => {
     fetchFamilies()
   }, [fetchFamilies])
@@ -253,13 +273,19 @@ export function RulesPanel() {
     fetchRules()
   }, [fetchRules])
 
+  // Handle search on Enter key
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      setSearchQuery(searchInput)
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Actions
   // ---------------------------------------------------------------------------
-  // Confirm destructive action
   const [confirmAction, setConfirmAction] = useState<{ ruleId: string; action: 'deprecate' | 'delete' } | null>(null)
 
-  const executeAction = async (ruleId: string, action: 'promote' | 'deprecate' | 'delete') => {
+  const executeAction = async (ruleId: string, action: 'promote' | 'deprecate' | 'delete' | 'restore') => {
     setActingRuleId(ruleId)
     try {
       const res = await fetch('/api/rules', {
@@ -277,6 +303,7 @@ export function RulesPanel() {
         promote: '晋升成功',
         deprecate: '已废弃',
         delete: '已删除',
+        restore: '已恢复',
       }
       toast.success(actionLabels[action] || '操作成功')
       await fetchRules()
@@ -287,7 +314,7 @@ export function RulesPanel() {
     }
   }
 
-  const handleAction = (ruleId: string, action: 'promote' | 'deprecate' | 'delete') => {
+  const handleAction = (ruleId: string, action: 'promote' | 'deprecate' | 'delete' | 'restore') => {
     if (action === 'deprecate' || action === 'delete') {
       setConfirmAction({ ruleId, action })
     } else {
@@ -298,23 +325,11 @@ export function RulesPanel() {
   // ---------------------------------------------------------------------------
   // Resolve source family name for transferred rules
   // ---------------------------------------------------------------------------
-  const getSourceFamilyName = (sourceFamilyId: string | null): string => {
-    if (!sourceFamilyId) return ''
-    const found = families.find((f) => f.key === sourceFamilyId)
-    return found ? found.name : sourceFamilyId
-  }
-
-  // For transferred rules, the API returns sourceFamilyId as the family ID (cuid),
-  // but we need to match by family key. Let's also check by matching family.id from rules.
   const getSourceFamilyNameFromRule = (rule: Rule): string => {
     if (rule.sourceType !== 'transferred' || !rule.sourceFamilyId) return ''
-    // Try to find by key first
     const byKey = families.find((f) => f.key === rule.sourceFamilyId)
     if (byKey) return byKey.name
-    // Try to find by matching other rules' familyId
-    const sourceRule = rules.find(
-      (r) => r.familyId === rule.sourceFamilyId
-    )
+    const sourceRule = rules.find((r) => r.familyId === rule.sourceFamilyId)
     if (sourceRule) return sourceRule.family.name
     return rule.sourceFamilyId
   }
@@ -372,61 +387,131 @@ export function RulesPanel() {
 
         {/* Filter Bar */}
         <motion.div
-          className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-8"
+          className="flex flex-col gap-3 mb-4"
           initial={{ opacity: 0 }}
           whileInView={{ opacity: 1 }}
           viewport={{ once: true }}
           transition={{ duration: 0.4, delay: 0.1 }}
         >
-          <div className="flex items-center gap-2">
-            <Filter className="w-4 h-4 text-slate-400" />
-            <Select value={familyFilter} onValueChange={setFamilyFilter}>
-              <SelectTrigger className="w-48 bg-slate-800/50 border-slate-600 text-slate-200">
-                <SelectValue placeholder="选择家族" />
+          {/* Row 1: Family, Status, Rule Type, Source Type */}
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <div className="flex items-center gap-2">
+              <Filter className="w-4 h-4 text-slate-400" />
+              <Select value={familyFilter} onValueChange={setFamilyFilter}>
+                <SelectTrigger className="w-44 bg-slate-800/50 border-slate-600 text-slate-200">
+                  <SelectValue placeholder="选择家族" />
+                </SelectTrigger>
+                <SelectContent className="bg-slate-800 border-slate-600">
+                  <SelectItem value="all" className="text-slate-200 focus:bg-slate-700 focus:text-slate-100">
+                    全部家族
+                  </SelectItem>
+                  {families.map((f) => (
+                    <SelectItem key={f.key} value={f.key} className="text-slate-200 focus:bg-slate-700 focus:text-slate-100">
+                      {f.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-40 bg-slate-800/50 border-slate-600 text-slate-200">
+                <SelectValue placeholder="选择状态" />
               </SelectTrigger>
               <SelectContent className="bg-slate-800 border-slate-600">
                 <SelectItem value="all" className="text-slate-200 focus:bg-slate-700 focus:text-slate-100">
-                  全部家族
+                  全部状态
                 </SelectItem>
-                {families.map((f) => (
-                  <SelectItem key={f.key} value={f.key} className="text-slate-200 focus:bg-slate-700 focus:text-slate-100">
-                    {f.name}
-                  </SelectItem>
-                ))}
+                <SelectItem value="active" className="text-slate-200 focus:bg-slate-700 focus:text-slate-100">
+                  活跃
+                </SelectItem>
+                <SelectItem value="candidate" className="text-slate-200 focus:bg-slate-700 focus:text-slate-100">
+                  候选
+                </SelectItem>
+                <SelectItem value="deprecated" className="text-slate-200 focus:bg-slate-700 focus:text-slate-100">
+                  已废弃
+                </SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={ruleTypeFilter} onValueChange={setRuleTypeFilter}>
+              <SelectTrigger className="w-36 bg-slate-800/50 border-slate-600 text-slate-200">
+                <SelectValue placeholder="规则类型" />
+              </SelectTrigger>
+              <SelectContent className="bg-slate-800 border-slate-600">
+                <SelectItem value="all" className="text-slate-200 focus:bg-slate-700 focus:text-slate-100">
+                  全部类型
+                </SelectItem>
+                <SelectItem value="positive" className="text-slate-200 focus:bg-slate-700 focus:text-slate-100">
+                  正面
+                </SelectItem>
+                <SelectItem value="negative" className="text-slate-200 focus:bg-slate-700 focus:text-slate-100">
+                  负面
+                </SelectItem>
+                <SelectItem value="conditional" className="text-slate-200 focus:bg-slate-700 focus:text-slate-100">
+                  条件
+                </SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={sourceTypeFilter} onValueChange={setSourceTypeFilter}>
+              <SelectTrigger className="w-36 bg-slate-800/50 border-slate-600 text-slate-200">
+                <SelectValue placeholder="来源类型" />
+              </SelectTrigger>
+              <SelectContent className="bg-slate-800 border-slate-600">
+                <SelectItem value="all" className="text-slate-200 focus:bg-slate-700 focus:text-slate-100">
+                  全部来源
+                </SelectItem>
+                <SelectItem value="seed" className="text-slate-200 focus:bg-slate-700 focus:text-slate-100">
+                  种子规则
+                </SelectItem>
+                <SelectItem value="evolved" className="text-slate-200 focus:bg-slate-700 focus:text-slate-100">
+                  进化规则
+                </SelectItem>
+                <SelectItem value="human" className="text-slate-200 focus:bg-slate-700 focus:text-slate-100">
+                  人工规则
+                </SelectItem>
+                <SelectItem value="transferred" className="text-slate-200 focus:bg-slate-700 focus:text-slate-100">
+                  迁移规则
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
 
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-44 bg-slate-800/50 border-slate-600 text-slate-200">
-              <SelectValue placeholder="选择状态" />
-            </SelectTrigger>
-            <SelectContent className="bg-slate-800 border-slate-600">
-              <SelectItem value="all" className="text-slate-200 focus:bg-slate-700 focus:text-slate-100">
-                全部状态
-              </SelectItem>
-              <SelectItem value="active" className="text-slate-200 focus:bg-slate-700 focus:text-slate-100">
-                活跃 (Active)
-              </SelectItem>
-              <SelectItem value="candidate" className="text-slate-200 focus:bg-slate-700 focus:text-slate-100">
-                候选 (Candidate)
-              </SelectItem>
-              <SelectItem value="deprecated" className="text-slate-200 focus:bg-slate-700 focus:text-slate-100">
-                已废弃 (Deprecated)
-              </SelectItem>
-            </SelectContent>
-          </Select>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => fetchRules()}
-            disabled={loading}
-            className="border-slate-600 text-slate-300 hover:bg-slate-800 hover:text-slate-100"
-          >
-            <RefreshCw className={`w-4 h-4 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
-            刷新
-          </Button>
+          {/* Row 2: Search + Refresh */}
+          <div className="flex items-center justify-center gap-3">
+            <div className="relative w-full max-w-md">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+              <Input
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                placeholder="搜索规则内容，按 Enter 搜索..."
+                className="pl-9 bg-slate-800/50 border-slate-600 text-slate-200 placeholder:text-slate-500 focus-visible:ring-amber-500/30"
+              />
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setSearchQuery(searchInput)
+              }}
+              className="border-slate-600 text-slate-300 hover:bg-slate-800 hover:text-slate-100"
+            >
+              <Search className="w-4 h-4 mr-1.5" />
+              搜索
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => fetchRules()}
+              disabled={loading}
+              className="border-slate-600 text-slate-300 hover:bg-slate-800 hover:text-slate-100"
+            >
+              <RefreshCw className={`w-4 h-4 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
+              刷新
+            </Button>
+          </div>
         </motion.div>
 
         {/* Stats Row */}
@@ -482,7 +567,7 @@ export function RulesPanel() {
                   <AnimatePresence mode="popLayout">
                     {rules.map((rule, idx) => {
                       const typeConfig = RULE_TYPE_CONFIG[rule.ruleType] || RULE_TYPE_CONFIG.positive
-                      const statusConfig = STATUS_CONFIG[rule.status] || STATUS_CONFIG.active
+                      const statusCfg = STATUS_CONFIG[rule.status] || STATUS_CONFIG.active
                       const sourceConfig = SOURCE_TYPE_COLORS[rule.sourceType] || SOURCE_TYPE_COLORS.seed
                       const familyDot = FAMILY_DOT[rule.family.key] || 'bg-slate-400'
                       const familyColor = FAMILY_COLORS[rule.family.key] || 'text-slate-400'
@@ -528,9 +613,9 @@ export function RulesPanel() {
                               {/* Status badge */}
                               <Badge
                                 variant="outline"
-                                className={`text-xs px-2 py-0.5 ${statusConfig.color} ${statusConfig.bg} ${statusConfig.border} border`}
+                                className={`text-xs px-2 py-0.5 ${statusCfg.color} ${statusCfg.bg} ${statusCfg.border} border`}
                               >
-                                {statusConfig.label}
+                                {statusCfg.label}
                               </Badge>
 
                               {/* Source type badge */}
@@ -598,6 +683,18 @@ export function RulesPanel() {
                                       <span className="text-slate-500">创建</span>
                                       <span className="text-slate-400">{new Date(rule.createdAt).toLocaleString('zh-CN')}</span>
                                     </div>
+
+                                    {/* Parent rule link */}
+                                    {rule.parentId && (
+                                      <div className="flex items-center gap-2 text-xs">
+                                        <Link2 className="w-3 h-3 text-slate-500" />
+                                        <span className="text-slate-500">父规则:</span>
+                                        <span className="text-amber-400 font-mono text-[11px]">
+                                          {rule.parentId.slice(0, 8)}...
+                                        </span>
+                                      </div>
+                                    )}
+
                                     <div className="flex items-center gap-2">
                                       <span className="text-xs text-slate-500 shrink-0">置信度</span>
                                       <Progress
@@ -660,28 +757,65 @@ export function RulesPanel() {
                             )}
 
                             {rule.status === 'deprecated' && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleAction(rule.id, 'delete')}
-                                disabled={actingRuleId === rule.id}
-                                className="border-rose-600/40 text-rose-500 hover:bg-rose-600/10 hover:text-rose-400 text-xs h-8 px-3"
-                              >
-                                {actingRuleId === rule.id ? (
-                                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                                ) : (
-                                  <>
-                                    <Trash2 className="w-3.5 h-3.5 mr-1" />
-                                    删除
-                                  </>
-                                )}
-                              </Button>
+                              <>
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleAction(rule.id, 'restore')}
+                                  disabled={actingRuleId === rule.id}
+                                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs h-8 px-3 shadow-sm"
+                                >
+                                  {actingRuleId === rule.id ? (
+                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <>
+                                      <RotateCcw className="w-3.5 h-3.5 mr-1" />
+                                      恢复
+                                    </>
+                                  )}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleAction(rule.id, 'delete')}
+                                  disabled={actingRuleId === rule.id}
+                                  className="border-rose-600/40 text-rose-500 hover:bg-rose-600/10 hover:text-rose-400 text-xs h-8 px-3"
+                                >
+                                  {actingRuleId === rule.id ? (
+                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <>
+                                      <Trash2 className="w-3.5 h-3.5 mr-1" />
+                                      删除
+                                    </>
+                                  )}
+                                </Button>
+                              </>
                             )}
                           </div>
                         </motion.div>
                       )
                     })}
                   </AnimatePresence>
+
+                  {/* Load More button */}
+                  {hasMore && (
+                    <div className="flex justify-center pt-4 pb-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={loadMore}
+                        disabled={loadingMore}
+                        className="border-slate-600 text-slate-300 hover:bg-slate-800 hover:text-slate-100"
+                      >
+                        {loadingMore ? (
+                          <RefreshCw className="w-4 h-4 mr-1.5 animate-spin" />
+                        ) : (
+                          <ChevronDown className="w-4 h-4 mr-1.5" />
+                        )}
+                        加载更多
+                      </Button>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="text-center py-16">

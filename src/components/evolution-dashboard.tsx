@@ -36,6 +36,13 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { toast } from 'sonner'
+import {
+  FAMILY_COLORS,
+  FAMILY_BG,
+  FAMILY_DOT,
+  FAMILY_NAMES,
+  EVENT_TYPE_CONFIG,
+} from '@/lib/family-constants'
 
 interface GlobalStats {
   totalFamilies: number
@@ -87,33 +94,6 @@ interface EvaluationRecord {
   humanScoreOverride: number | null
   humanFeedback: string | { text: string; timestamp: string } | null
   createdAt: string
-}
-
-const FAMILY_COLORS: Record<string, string> = {
-  narrative_visual: 'text-orange-400',
-  interactive_ui: 'text-emerald-400',
-  spatial: 'text-violet-400',
-  character: 'text-rose-400',
-  graphic_composition: 'text-cyan-400',
-  dynamic_rhythm: 'text-amber-400',
-}
-
-const FAMILY_BG: Record<string, string> = {
-  narrative_visual: 'bg-orange-500/10',
-  interactive_ui: 'bg-emerald-500/10',
-  spatial: 'bg-violet-500/10',
-  character: 'bg-rose-500/10',
-  graphic_composition: 'bg-cyan-500/10',
-  dynamic_rhythm: 'bg-amber-500/10',
-}
-
-const FAMILY_DOT: Record<string, string> = {
-  narrative_visual: 'bg-orange-400',
-  interactive_ui: 'bg-emerald-400',
-  spatial: 'bg-violet-400',
-  character: 'bg-rose-400',
-  graphic_composition: 'bg-cyan-400',
-  dynamic_rhythm: 'bg-amber-400',
 }
 
 export function EvolutionDashboard() {
@@ -350,61 +330,64 @@ export function EvolutionDashboard() {
                   </div>
                 ) : familyEvolutions.length > 0 ? (
                   <div className="space-y-3 max-h-96 overflow-y-auto custom-scrollbar pr-1">
-                    {familyEvolutions.map((fam) => (
-                      <div
-                        key={fam.familyKey}
-                        className="flex items-center gap-4 p-3 rounded-lg bg-slate-800/30 border border-slate-700/30"
-                      >
-                        <div className={`p-2 rounded-lg ${FAMILY_BG[fam.familyKey] || 'bg-slate-700/30'}`}>
-                          <TrendingUp className={`w-4 h-4 ${FAMILY_COLORS[fam.familyKey] || 'text-slate-400'}`} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between mb-1">
-                            <span className={`text-sm font-medium ${FAMILY_COLORS[fam.familyKey] || 'text-slate-300'}`}>
-                              {fam.familyName}
-                            </span>
-                            <span className="text-xs text-slate-500">
-                              Gen {fam.stats.latestGeneration}
-                            </span>
+                    {familyEvolutions.map((fam) => {
+                      const confidenceValue = Math.round(fam.stats.avgRuleConfidence * 100)
+                      return (
+                        <div
+                          key={fam.familyKey}
+                          className="flex items-center gap-4 p-3 rounded-lg bg-slate-800/30 border border-slate-700/30"
+                        >
+                          <div className={`p-2 rounded-lg ${FAMILY_BG[fam.familyKey] || 'bg-slate-700/30'}`}>
+                            <TrendingUp className={`w-4 h-4 ${FAMILY_COLORS[fam.familyKey] || 'text-slate-400'}`} />
                           </div>
-                          <div className="flex items-center gap-3 text-xs text-slate-400 mb-1.5">
-                            <span>评估: {fam.stats.totalEvaluations}</span>
-                            <span>规则: {fam.stats.totalRules}</span>
-                            {fam.stats.avgScore > 0 && (
-                              <span>均分: {fam.stats.avgScore.toFixed(1)}</span>
-                            )}
-                          </div>
-                          <Progress
-                            value={Math.min(fam.stats.totalEvaluations * 5, 100)}
-                            className="h-1 bg-slate-700/50 [&>div]:bg-amber-500"
-                          />
-                          {fam.stats.rulesByType && (
-                            <div className="flex items-center gap-2 mt-1.5">
-                              {fam.stats.rulesByType.positive > 0 && (
-                                <Badge variant="outline" className="text-[10px] px-1 py-0 border-emerald-500/20 text-emerald-400 bg-emerald-500/5">
-                                  +{fam.stats.rulesByType.positive}
-                                </Badge>
-                              )}
-                              {fam.stats.rulesByType.negative > 0 && (
-                                <Badge variant="outline" className="text-[10px] px-1 py-0 border-rose-500/20 text-rose-400 bg-rose-500/5">
-                                  -{fam.stats.rulesByType.negative}
-                                </Badge>
-                              )}
-                              {fam.stats.rulesByType.conditional > 0 && (
-                                <Badge variant="outline" className="text-[10px] px-1 py-0 border-violet-500/20 text-violet-400 bg-violet-500/5">
-                                  ?{fam.stats.rulesByType.conditional}
-                                </Badge>
-                              )}
-                              {fam.stats.avgRuleConfidence > 0 && (
-                                <span className="text-[10px] text-slate-500 ml-auto">
-                                  置信度 {fam.stats.avgRuleConfidence.toFixed(0)}%
-                                </span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className={`text-sm font-medium ${FAMILY_COLORS[fam.familyKey] || 'text-slate-300'}`}>
+                                {fam.familyName}
+                              </span>
+                              <span className="text-xs text-slate-500">
+                                Gen {fam.stats.latestGeneration}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-3 text-xs text-slate-400 mb-1.5">
+                              <span>评估: {fam.stats.totalEvaluations}</span>
+                              <span>规则: {fam.stats.totalRules}</span>
+                              {fam.stats.avgScore > 0 && (
+                                <span>均分: {fam.stats.avgScore.toFixed(1)}</span>
                               )}
                             </div>
-                          )}
+                            <div className="flex items-center gap-2">
+                              <Progress
+                                value={confidenceValue}
+                                className="h-1 bg-slate-700/50 [&>div]:bg-amber-500 flex-1"
+                              />
+                              <span className="text-[10px] text-slate-500 shrink-0">
+                                规则置信度 {confidenceValue}%
+                              </span>
+                            </div>
+                            {fam.stats.rulesByType && (
+                              <div className="flex items-center gap-2 mt-1.5">
+                                {fam.stats.rulesByType.positive > 0 && (
+                                  <Badge variant="outline" className="text-[10px] px-1 py-0 border-emerald-500/20 text-emerald-400 bg-emerald-500/5">
+                                    +{fam.stats.rulesByType.positive}
+                                  </Badge>
+                                )}
+                                {fam.stats.rulesByType.negative > 0 && (
+                                  <Badge variant="outline" className="text-[10px] px-1 py-0 border-rose-500/20 text-rose-400 bg-rose-500/5">
+                                    -{fam.stats.rulesByType.negative}
+                                  </Badge>
+                                )}
+                                {fam.stats.rulesByType.conditional > 0 && (
+                                  <Badge variant="outline" className="text-[10px] px-1 py-0 border-violet-500/20 text-violet-400 bg-violet-500/5">
+                                    ?{fam.stats.rulesByType.conditional}
+                                  </Badge>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 ) : (
                   <div className="text-center py-8 text-slate-500 text-sm">
@@ -438,36 +421,42 @@ export function EvolutionDashboard() {
                   </div>
                 ) : allEvents.length > 0 ? (
                   <div className="space-y-1 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
-                    {allEvents.map((event, idx) => (
-                      <div key={event.id || idx} className="flex gap-3 p-3 rounded-lg hover:bg-slate-800/30 transition-colors">
-                        <div className="flex flex-col items-center">
-                          <div className={`w-2.5 h-2.5 rounded-full ${FAMILY_DOT[event.familyKey] || 'bg-amber-500'} mt-1.5 shrink-0`} />
-                          {idx < allEvents.length - 1 && (
-                            <div className="w-px flex-1 bg-slate-700/50 mt-1" />
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-0.5">
-                            <Badge variant="outline" className="text-xs px-1.5 py-0 border-amber-500/20 text-amber-300 bg-amber-500/5">
-                              {event.eventType}
-                            </Badge>
-                            <Badge variant="outline" className="text-xs px-1.5 py-0 border-slate-600 text-slate-400">
-                              {event.familyName}
-                            </Badge>
-                            {event.generation > 0 && (
-                              <Badge variant="outline" className="text-xs px-1.5 py-0 border-violet-500/20 text-violet-300 bg-violet-500/5">
-                                Gen {event.generation}
-                              </Badge>
+                    {allEvents.map((event, idx) => {
+                      const evtConfig = EVENT_TYPE_CONFIG[event.eventType]
+                      return (
+                        <div key={event.id || idx} className="flex gap-3 p-3 rounded-lg hover:bg-slate-800/30 transition-colors">
+                          <div className="flex flex-col items-center">
+                            <div className={`w-2.5 h-2.5 rounded-full ${FAMILY_DOT[event.familyKey] || 'bg-amber-500'} mt-1.5 shrink-0`} />
+                            {idx < allEvents.length - 1 && (
+                              <div className="w-px flex-1 bg-slate-700/50 mt-1" />
                             )}
                           </div>
-                          <p className="text-sm text-slate-400 line-clamp-2">{event.description}</p>
-                          <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            {new Date(event.createdAt).toLocaleString('zh-CN')}
-                          </p>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <Badge
+                                variant="outline"
+                                className={`text-xs px-1.5 py-0 ${evtConfig ? `${evtConfig.border} ${evtConfig.color} ${evtConfig.bg}` : 'border-amber-500/20 text-amber-300 bg-amber-500/5'}`}
+                              >
+                                {evtConfig ? evtConfig.label : event.eventType}
+                              </Badge>
+                              <Badge variant="outline" className="text-xs px-1.5 py-0 border-slate-600 text-slate-400">
+                                {event.familyName}
+                              </Badge>
+                              {event.generation > 0 && (
+                                <Badge variant="outline" className="text-xs px-1.5 py-0 border-violet-500/20 text-violet-300 bg-violet-500/5">
+                                  Gen {event.generation}
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="text-sm text-slate-400 line-clamp-2">{event.description}</p>
+                            <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              {new Date(event.createdAt).toLocaleString('zh-CN')}
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 ) : (
                   <div className="text-center py-8 text-slate-500 text-sm">
