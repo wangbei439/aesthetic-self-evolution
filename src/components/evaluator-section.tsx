@@ -17,6 +17,8 @@ import {
   Link,
   RefreshCw,
   ArrowUpDown,
+  Brain,
+  Eye,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -33,6 +35,8 @@ import {
 } from '@/components/ui/select'
 import ReactMarkdown from 'react-markdown'
 import { toast } from 'sonner'
+import { ModelStatusIndicator } from '@/components/model-status-indicator'
+import { AIConfigPanel } from '@/components/ai-config-panel'
 
 interface EvaluationResult {
   id: string
@@ -66,6 +70,10 @@ interface EvaluationResult {
   previousEvaluationId?: string
   evolutionGeneration: number
   ruleVersionUsed: string | null
+  modelUsed?: {
+    classification?: string | null
+    evaluation?: string | null
+  }
   createdAt: string
 }
 
@@ -282,6 +290,28 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
           <p className="text-slate-400 text-lg max-w-2xl mx-auto">
             上传图片或输入URL，选择审美家族，获取域感知的精准审美评估
           </p>
+        </motion.div>
+
+        {/* Model Status Indicator */}
+        <motion.div
+          className="mb-4"
+          initial={{ opacity: 0, y: 10 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.4, delay: 0.1 }}
+        >
+          <ModelStatusIndicator />
+        </motion.div>
+
+        {/* AI Config Panel — runtime model switching */}
+        <motion.div
+          className="mb-8"
+          initial={{ opacity: 0, y: 10 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.4, delay: 0.15 }}
+        >
+          <AIConfigPanel />
         </motion.div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -515,6 +545,23 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
                           世代 Gen-{result.evolutionGeneration}
                           {result.ruleVersionUsed && ` · 规则 ${result.ruleVersionUsed}`}
                         </p>
+                      )}
+                      {/* Model used badge */}
+                      {result.modelUsed && (
+                        <div className="flex items-center justify-center gap-2 mt-2">
+                          {result.modelUsed.classification && (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 border-violet-500/20 text-violet-300 bg-violet-500/5">
+                              <Eye className="w-3 h-3 mr-1" />
+                              分类: {result.modelUsed.classification.includes('v') || result.modelUsed.classification.includes('V') ? 'VLM' : 'LLM'}
+                            </Badge>
+                          )}
+                          {result.modelUsed.evaluation && (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 border-amber-500/20 text-amber-300 bg-amber-500/5">
+                              <Brain className="w-3 h-3 mr-1" />
+                              评估: {result.modelUsed.evaluation.includes('v') || result.modelUsed.evaluation.includes('V') ? 'VLM' : 'LLM'}
+                            </Badge>
+                          )}
+                        </div>
                       )}
                       {/* Re-evaluation comparison badge */}
                       {result.scoreDelta !== undefined && result.scoreDelta !== 0 && (

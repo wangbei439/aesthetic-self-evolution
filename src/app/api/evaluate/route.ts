@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import ZAI from "z-ai-web-dev-sdk";
+import { getAIProvider } from "@/lib/ai";
+import { parseVLMJson } from "@/lib/ai/parse-json";
 
 // ---------------------------------------------------------------------------
 // Helper: convert a File (from FormData) to a base64 data-URL string
@@ -10,36 +11,6 @@ async function fileToBase64(file: File): Promise<string> {
   const buffer = Buffer.from(arrayBuffer);
   const base64 = buffer.toString("base64");
   return `data:${file.type || "image/png"};base64,${base64}`;
-}
-
-// ---------------------------------------------------------------------------
-// Helper: safely parse JSON from VLM response text
-// ---------------------------------------------------------------------------
-function parseVLMJson<T = unknown>(text: string): T | null {
-  try {
-    // Try direct parse first
-    return JSON.parse(text) as T;
-  } catch {
-    // Try to extract JSON from markdown code blocks
-    const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (jsonMatch) {
-      try {
-        return JSON.parse(jsonMatch[1].trim()) as T;
-      } catch {
-        return null;
-      }
-    }
-    // Try to find the first { ... } block
-    const braceMatch = text.match(/\{[\s\S]*\}/);
-    if (braceMatch) {
-      try {
-        return JSON.parse(braceMatch[0]) as T;
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -225,8 +196,9 @@ export async function POST(request: Request) {
       );
     }
 
-    // ---- Initialize VLM client ----
-    const zai = await ZAI.create();
+    // ---- Initialize AI provider ----
+    const ai = await getAIProvider();
+    const providerInfo = ai.getInfo();
 
     // ---- Step 1: Classify the image domain (if familyKey not provided) ----
     let familyKey: string;
@@ -249,8 +221,7 @@ export async function POST(request: Request) {
       familyKey = familyKeyParam;
     } else {
       // Auto-classify using VLM
-      const classificationResponse = await zai.chat.completions.createVision({
-        model: "qwen2.5-vl-72b-instruct",
+      const classificationResponse = await ai.visionChat({
         messages: [
           {
             role: "user",
@@ -262,8 +233,7 @@ export async function POST(request: Request) {
         ],
       });
 
-      const classificationText =
-        classificationResponse?.choices?.[0]?.message?.content || "";
+      const classificationText = classificationResponse.content;
       const classificationResult = parseVLMJson<{
         familyKey: string;
         confidence: number;
@@ -338,8 +308,7 @@ export async function POST(request: Request) {
       }))
     );
 
-    const evaluationResponse = await zai.chat.completions.createVision({
-      model: "qwen2.5-vl-72b-instruct",
+    const evaluationResponse = await ai.visionChat({
       messages: [
         {
           role: "system",
@@ -356,8 +325,7 @@ export async function POST(request: Request) {
       ],
     });
 
-    const evaluationText =
-      evaluationResponse?.choices?.[0]?.message?.content || "";
+    const evaluationText = evaluationResponse.content;
 
     interface EvaluationResult {
       dimensionScores: Record<string, number>;
@@ -374,7 +342,7 @@ export async function POST(request: Request) {
     if (!evaluationResult || !evaluationResult.dimensionScores) {
       return NextResponse.json(
         {
-          error: "Failed to parse evaluation results from VLM",
+          error: "Failed to parse evaluation results from AI model",
           rawResponse: evaluationText,
         },
         { status: 422 }
@@ -518,6 +486,7 @@ export async function POST(request: Request) {
         familyKey,
         detectedDomain: detectedDomain,
         confidence: domainConfidence,
+        modelUsed: familyKeyParam ? null : providerInfo.vlmModel,
       },
       evaluation: {
         dimensionScores: evaluationResult.dimensionScores,
@@ -527,6 +496,14 @@ export async function POST(request: Request) {
         weaknesses: evaluationResult.weaknesses || [],
         suggestions: evaluationResult.suggestions || [],
         assessment: evaluationResult.evaluation,
+      },
+      modelUsed: {
+        classification: familyKeyParam ? null : providerInfo.vlmModel,
+        evaluation: providerInfo.vlmModel,
+      },
+      provider: {
+        name: providerInfo.providerLabel,
+        isSandbox: providerInfo.isSandbox,
       },
       evolutionGeneration: currentGeneration,
       ruleVersionUsed,

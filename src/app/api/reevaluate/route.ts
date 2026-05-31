@@ -1,33 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import ZAI from "z-ai-web-dev-sdk";
-
-// ---------------------------------------------------------------------------
-// Helper: safely parse JSON from VLM response text
-// ---------------------------------------------------------------------------
-function parseVLMJson<T = unknown>(text: string): T | null {
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (jsonMatch) {
-      try {
-        return JSON.parse(jsonMatch[1].trim()) as T;
-      } catch {
-        return null;
-      }
-    }
-    const braceMatch = text.match(/\{[\s\S]*\}/);
-    if (braceMatch) {
-      try {
-        return JSON.parse(braceMatch[0]) as T;
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  }
-}
+import { getAIProvider } from "@/lib/ai";
+import { parseVLMJson } from "@/lib/ai/parse-json";
 
 // ---------------------------------------------------------------------------
 // POST /api/reevaluate — Re-evaluate an existing evaluation with current rules
@@ -149,11 +123,11 @@ Respond ONLY in valid JSON format:
 
 Be specific, insightful, and constructive. Avoid generic praise. Focus on observable visual qualities.`;
 
-    // Initialize VLM and perform re-evaluation
-    const zai = await ZAI.create();
+    // Initialize AI provider and perform re-evaluation
+    const ai = await getAIProvider();
+    const providerInfo = ai.getInfo();
 
-    const evaluationResponse = await zai.chat.completions.createVision({
-      model: "qwen2.5-vl-72b-instruct",
+    const evaluationResponse = await ai.visionChat({
       messages: [
         {
           role: "system",
@@ -170,8 +144,7 @@ Be specific, insightful, and constructive. Avoid generic praise. Focus on observ
       ],
     });
 
-    const evaluationText =
-      evaluationResponse?.choices?.[0]?.message?.content || "";
+    const evaluationText = evaluationResponse.content;
 
     interface EvaluationResult {
       dimensionScores: Record<string, number>;
@@ -189,7 +162,7 @@ Be specific, insightful, and constructive. Avoid generic praise. Focus on observ
     if (!evaluationResult || !evaluationResult.dimensionScores) {
       return NextResponse.json(
         {
-          error: "Failed to parse re-evaluation results from VLM",
+          error: "Failed to parse re-evaluation results from AI model",
           rawResponse: evaluationText,
         },
         { status: 422 }
@@ -331,6 +304,13 @@ Be specific, insightful, and constructive. Avoid generic praise. Focus on observ
         weaknesses: evaluationResult.weaknesses || [],
         suggestions: evaluationResult.suggestions || [],
         assessment: evaluationResult.evaluation,
+      },
+      modelUsed: {
+        evaluation: providerInfo.vlmModel,
+      },
+      provider: {
+        name: providerInfo.providerLabel,
+        isSandbox: providerInfo.isSandbox,
       },
       comparisonWithPrevious: evaluationResult.comparisonWithPrevious || null,
       previousScore: existingEval.overallScore,

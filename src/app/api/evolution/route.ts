@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import ZAI from "z-ai-web-dev-sdk";
+import { getAIProvider } from "@/lib/ai";
+import { parseVLMJson } from "@/lib/ai/parse-json";
 
 // ---------------------------------------------------------------------------
 // GET /api/evolution — Return evolution stats for each family
@@ -34,9 +35,6 @@ export async function GET() {
             ruleType: true,
           },
         },
-        // recent evolution events
-        // (Prisma doesn't support direct limit on include for unrelated models,
-        //  so we fetch separately below)
       },
     });
 
@@ -206,7 +204,7 @@ export async function POST(request: Request) {
       dimensions: { key: string; name: string; desc: string }[];
     };
 
-    // Build summary of evaluation data for VLM analysis
+    // Build summary of evaluation data for AI analysis
     const evaluationSummary = recentEvaluations.map((e, i) => {
       const dimScores = JSON.parse(e.dimensionScores) as Record<
         string,
@@ -273,11 +271,11 @@ Respond ONLY in valid JSON format:
   ]
 }`;
 
-    // Initialize VLM and perform reflection
-    const zai = await ZAI.create();
+    // Initialize AI provider and perform reflection
+    const ai = await getAIProvider();
+    const providerInfo = ai.getInfo();
 
-    const reflectionResponse = await zai.chat.completions.create({
-      model: "qwen2.5-72b-instruct",
+    const reflectionResponse = await ai.chat({
       messages: [
         {
           role: "system",
@@ -291,8 +289,7 @@ Respond ONLY in valid JSON format:
       ],
     });
 
-    const reflectionText =
-      reflectionResponse?.choices?.[0]?.message?.content || "";
+    const reflectionText = reflectionResponse.content;
 
     interface ReflectionResult {
       reflection: string;
@@ -307,15 +304,7 @@ Respond ONLY in valid JSON format:
     }
 
     // Parse reflection result
-    let reflectionResult: ReflectionResult | null = null;
-    try {
-      const jsonMatch = reflectionText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        reflectionResult = JSON.parse(jsonMatch[0]) as ReflectionResult;
-      }
-    } catch {
-      // Fallback: create minimal reflection
-    }
+    const reflectionResult = parseVLMJson<ReflectionResult>(reflectionText);
 
     if (!reflectionResult) {
       // Record failed evolution event
@@ -323,7 +312,7 @@ Respond ONLY in valid JSON format:
         data: {
           familyId: family.id,
           eventType: "reflection",
-          description: "Evolution cycle failed: could not parse VLM reflection output",
+          description: "Evolution cycle failed: could not parse AI reflection output",
           metadata: JSON.stringify({ rawResponse: reflectionText.substring(0, 500) }),
           generation: currentGeneration,
         },
@@ -331,7 +320,7 @@ Respond ONLY in valid JSON format:
 
       return NextResponse.json(
         {
-          error: "Failed to parse evolution reflection from VLM",
+          error: "Failed to parse evolution reflection from AI model",
           rawResponse: reflectionText,
         },
         { status: 422 }
@@ -476,7 +465,7 @@ Respond ONLY in valid JSON format:
     }
 
     if (transferableRules.length > 0) {
-      // Attempt transfer: ask VLM if any of these rules could apply
+      // Attempt transfer: ask AI if any of these rules could apply
       const transferPrompt = `You are evaluating whether aesthetic rules from other domains can be adapted for the "${family.name}" domain.
 
 Family: ${family.name} (${family.key})
@@ -506,8 +495,7 @@ Respond ONLY in valid JSON format:
   ]
 }`;
 
-      const transferResponse = await zai.chat.completions.create({
-        model: "qwen2.5-72b-instruct",
+      const transferResponse = await ai.chat({
         messages: [
           {
             role: "system",
@@ -518,8 +506,7 @@ Respond ONLY in valid JSON format:
         ],
       });
 
-      const transferText =
-        transferResponse?.choices?.[0]?.message?.content || "";
+      const transferText = transferResponse.content;
 
       interface TransferResult {
         transferableRules: {
@@ -531,15 +518,7 @@ Respond ONLY in valid JSON format:
         }[];
       }
 
-      let transferResult: TransferResult | null = null;
-      try {
-        const jsonMatch = transferText.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          transferResult = JSON.parse(jsonMatch[0]) as TransferResult;
-        }
-      } catch {
-        // Transfer failed, continue without it
-      }
+      const transferResult = parseVLMJson<TransferResult>(transferText);
 
       const transferredRules = [];
       if (transferResult?.transferableRules?.length) {
@@ -642,6 +621,14 @@ Respond ONLY in valid JSON format:
       deprecatedRules,
       createdRules,
       evaluationSampleSize: recentEvaluations.length,
+      modelUsed: {
+        reflection: providerInfo.llmModel,
+        transfer: transferableRules.length > 0 ? providerInfo.llmModel : null,
+      },
+      provider: {
+        name: providerInfo.providerLabel,
+        isSandbox: providerInfo.isSandbox,
+      },
     });
   } catch (error) {
     console.error("[API /evolution POST] Error:", error);

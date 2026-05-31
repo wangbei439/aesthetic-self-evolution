@@ -177,7 +177,8 @@ export function EvolutionDashboard() {
         throw new Error(err.error || '进化触发失败')
       }
       const data = await res.json()
-      toast.success(`进化周期完成! ${data.familyName} 已进化至 Gen-${data.generation}`)
+      const modelInfo = data.modelUsed ? ` (反思: ${data.modelUsed.reflection?.includes('v') ? 'VLM' : 'LLM'}${data.modelUsed.transfer ? ', 迁移: LLM' : ''})` : ''
+      toast.success(`进化周期完成! ${data.familyName} 已进化至 Gen-${data.generation}${modelInfo}`)
       await fetchData()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '进化失败，请重试')

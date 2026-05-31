@@ -68,3 +68,6 @@ worklog.md
 local-*
 prompt
 test
+
+# AI runtime config (contains API keys)
+db/ai-config.json
