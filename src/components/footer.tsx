@@ -23,6 +23,15 @@ export function Footer() {
           </p>
 
           <div className="flex items-center gap-4">
+            <a
+              href="https://github.com/wangbei439/aesthetic-self-evolution"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-slate-500 hover:text-slate-300 transition-colors"
+              aria-label="GitHub"
+            >
+              <Github className="w-5 h-5" />
+            </a>
             <span className="text-xs text-slate-600">
               © 2024 Aesthetic Self-Evolution
             </span>

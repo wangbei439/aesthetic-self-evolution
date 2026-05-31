@@ -1,16 +1,21 @@
 'use client'
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { HeroSection } from '@/components/hero-section'
 import { FamiliesSection } from '@/components/families-section'
 import { EvaluatorSection } from '@/components/evaluator-section'
 import { EvolutionDashboard } from '@/components/evolution-dashboard'
+import { RulesPanel } from '@/components/rules-panel'
 import { ArchitectureSection } from '@/components/architecture-section'
 import { Footer } from '@/components/footer'
 
 export default function Home() {
   const [preselectedFamily, setPreselectedFamily] = useState<string | null>(null)
   const evaluatorRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    fetch('/api/seed').catch(() => {})
+  }, [])
 
   const scrollToEvaluator = useCallback(() => {
     evaluatorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -32,6 +37,7 @@ export default function Home() {
         <EvaluatorSection preselectedFamily={preselectedFamily} />
       </div>
       <EvolutionDashboard />
+      <RulesPanel />
       <ArchitectureSection />
       <Footer />
     </div>

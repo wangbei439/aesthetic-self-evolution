@@ -364,7 +364,7 @@ export async function POST(request: Request) {
     const savedEvaluation = await db.aestheticEvaluation.create({
       data: {
         familyId: family.id,
-        imageUrl: imageBase64.substring(0, 100), // Store truncated reference, not full base64
+        imageUrl: imageBase64, // Store full base64 for future reference and re-evaluation
         detectedDomain: detectedDomain,
         domainConfidence: domainConfidence,
         overallScore: evaluationResult.overallScore || 0,
@@ -419,6 +419,47 @@ export async function POST(request: Request) {
           }
         }
       }
+    }
+
+    // ---- Step 7: Auto-promote candidate rules that have enough support ----
+    const candidateRules = await db.aestheticRule.findMany({
+      where: {
+        familyId: family.id,
+        status: "candidate",
+        supportCount: { gte: 3 },
+        confidence: { gte: 0.5 },
+      },
+    });
+
+    const promotedRules: string[] = [];
+    for (const candidate of candidateRules) {
+      await db.aestheticRule.update({
+        where: { id: candidate.id },
+        data: {
+          status: "active",
+          confidence: 0.5,
+        },
+      });
+
+      promotedRules.push(candidate.id);
+
+      await db.evolutionEvent.create({
+        data: {
+          familyId: family.id,
+          eventType: "rule_created",
+          description: `Candidate rule auto-promoted to active: "${candidate.ruleContent}"`,
+          metadata: JSON.stringify({
+            ruleId: candidate.id,
+            action: "auto_promote",
+            previousStatus: "candidate",
+            previousConfidence: candidate.confidence,
+            newConfidence: 0.5,
+            supportCount: candidate.supportCount,
+            contradictCount: candidate.contradictCount,
+          }),
+          generation: candidate.generation,
+        },
+      });
     }
 
     // ---- Return structured result ----

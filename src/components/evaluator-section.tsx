@@ -11,12 +11,16 @@ import {
   Lightbulb,
   Sparkles,
   FileImage,
+  MessageSquare,
+  ChevronDown,
+  Send,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Select,
   SelectContent,
@@ -100,6 +104,11 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
   const [result, setResult] = useState<EvaluationResult | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const [humanScore, setHumanScore] = useState<string>('')
+  const [humanFeedbackText, setHumanFeedbackText] = useState('')
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false)
+  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false)
 
   useEffect(() => {
     if (preselectedFamily) {
@@ -152,6 +161,10 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
 
     setLoading(true)
     setResult(null)
+    setFeedbackOpen(false)
+    setHumanScore('')
+    setHumanFeedbackText('')
+    setFeedbackSubmitted(false)
 
     try {
       const formData = new FormData()
@@ -356,8 +369,13 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
                     <p className="text-slate-400 mt-4 text-sm">
                       正在进行审美评估...
                     </p>
-                    <div className="w-48 mt-4">
-                      <Progress value={66} className="h-1.5 [&>div]:bg-amber-500" />
+                    <div className="w-48 mt-4 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                      <motion.div
+                        className="h-full bg-amber-500 rounded-full"
+                        animate={{ x: ["-100%", "100%"] }}
+                        transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+                        style={{ width: "40%" }}
+                      />
                     </div>
                   </div>
                 </CardContent>
@@ -493,6 +511,114 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
                         </div>
                       </div>
                     )}
+
+                    {/* Human Feedback Section */}
+                    <Separator className="bg-slate-700/50" />
+                    <div className="bg-slate-800/30 rounded-lg p-4 border border-slate-700/30">
+                      <button
+                        className="flex items-center gap-2 text-sm font-medium text-slate-300 w-full text-left"
+                        onClick={() => setFeedbackOpen(!feedbackOpen)}
+                      >
+                        <MessageSquare className="w-4 h-4 text-amber-400" />
+                        人工反馈
+                        <ChevronDown
+                          className={`w-4 h-4 text-slate-500 transition-transform duration-200 ${feedbackOpen ? 'rotate-180' : ''}`}
+                        />
+                      </button>
+
+                      {feedbackOpen && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="mt-4 space-y-4"
+                        >
+                          {/* Score input */}
+                          <div>
+                            <label className="text-xs text-slate-400 mb-1.5 block">
+                              你的评分 (0-10)
+                            </label>
+                            <input
+                              type="number"
+                              min={0}
+                              max={10}
+                              step={0.5}
+                              value={humanScore}
+                              onChange={(e) => setHumanScore(e.target.value)}
+                              className="w-24 rounded-md border border-slate-600 bg-slate-900/50 px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-amber-500 focus:border-amber-500"
+                              placeholder="0-10"
+                              disabled={feedbackSubmitted}
+                            />
+                          </div>
+
+                          {/* Feedback text */}
+                          <div>
+                            <label className="text-xs text-slate-400 mb-1.5 block">
+                              反馈意见
+                            </label>
+                            <Textarea
+                              value={humanFeedbackText}
+                              onChange={(e) => setHumanFeedbackText(e.target.value)}
+                              placeholder="请输入你对这次评估的反馈意见..."
+                              className="bg-slate-900/50 border-slate-600 text-slate-200 placeholder:text-slate-600 min-h-[80px] resize-none"
+                              disabled={feedbackSubmitted}
+                            />
+                          </div>
+
+                          {/* Submit button */}
+                          {feedbackSubmitted ? (
+                            <div className="flex items-center gap-2 text-emerald-400 text-sm">
+                              <CheckCircle2 className="w-4 h-4" />
+                              已提交
+                            </div>
+                          ) : (
+                            <Button
+                              onClick={async () => {
+                                const score = parseFloat(humanScore)
+                                if (humanScore && (isNaN(score) || score < 0 || score > 10)) {
+                                  toast.error('评分需在0-10之间')
+                                  return
+                                }
+                                if (!humanScore && !humanFeedbackText.trim()) {
+                                  toast.error('请填写评分或反馈意见')
+                                  return
+                                }
+                                setFeedbackSubmitting(true)
+                                try {
+                                  const body: { humanScoreOverride?: number; humanFeedback?: string } = {}
+                                  if (humanScore) body.humanScoreOverride = score
+                                  if (humanFeedbackText.trim()) body.humanFeedback = humanFeedbackText.trim()
+                                  const res = await fetch(`/api/evaluations/${result.id}`, {
+                                    method: 'PATCH',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify(body),
+                                  })
+                                  if (!res.ok) {
+                                    const err = await res.json().catch(() => ({}))
+                                    throw new Error(err.error || '提交失败')
+                                  }
+                                  setFeedbackSubmitted(true)
+                                  toast.success('反馈提交成功！')
+                                } catch (err) {
+                                  toast.error(err instanceof Error ? err.message : '提交失败，请重试')
+                                } finally {
+                                  setFeedbackSubmitting(false)
+                                }
+                              }}
+                              disabled={feedbackSubmitting}
+                              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold"
+                            >
+                              {feedbackSubmitting ? (
+                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                              ) : (
+                                <Send className="w-4 h-4 mr-2" />
+                              )}
+                              提交反馈
+                            </Button>
+                          )}
+                        </motion.div>
+                      )}
+                    </div>
                   </CardContent>
                 </Card>
               </motion.div>

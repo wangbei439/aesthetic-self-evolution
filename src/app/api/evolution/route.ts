@@ -176,12 +176,12 @@ export async function POST(request: Request) {
       take: 20,
     });
 
-    if (recentEvaluations.length < 1) {
+    if (recentEvaluations.length < 3) {
       return NextResponse.json(
         {
-          error:
-            "Not enough evaluations to trigger evolution. Need at least 1 evaluation.",
+          error: "Need at least 3 evaluations.",
           familyKey,
+          currentCount: recentEvaluations.length,
         },
         { status: 400 }
       );

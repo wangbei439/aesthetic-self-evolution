@@ -13,6 +13,7 @@ import {
   BarChart3,
   Hash,
   Zap,
+  MessageSquare,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -81,7 +82,10 @@ interface EvaluationRecord {
     color: string
   }
   overallScore: number
+  dimensionScores: Record<string, number>
   evolutionGeneration: number
+  humanScoreOverride: number | null
+  humanFeedback: string | { text: string; timestamp: string } | null
   createdAt: string
 }
 
@@ -295,23 +299,30 @@ export function EvolutionDashboard() {
               ))}
             </SelectContent>
           </Select>
-          <Button
-            onClick={triggerEvolution}
-            disabled={evolving || familyEvolutions.length === 0}
-            className="bg-violet-600 hover:bg-violet-500 text-white font-semibold px-8 py-5 rounded-xl shadow-lg shadow-violet-500/20 transition-all duration-300 hover:shadow-violet-500/30"
-          >
-            {evolving ? (
-              <>
-                <RefreshCw className="w-5 h-5 mr-2 animate-spin" />
-                进化中...
-              </>
-            ) : (
-              <>
-                <Dna className="w-5 h-5 mr-2" />
-                触发进化周期
-              </>
+          <div className="flex flex-col items-center gap-2">
+            <Button
+              onClick={triggerEvolution}
+              disabled={evolving || familyEvolutions.length === 0 || (familyEvolutions.find(f => f.familyKey === selectedFamily)?.stats.totalEvaluations ?? 0) < 3}
+              className="bg-violet-600 hover:bg-violet-500 text-white font-semibold px-8 py-5 rounded-xl shadow-lg shadow-violet-500/20 transition-all duration-300 hover:shadow-violet-500/30 disabled:opacity-50"
+            >
+              {evolving ? (
+                <>
+                  <RefreshCw className="w-5 h-5 mr-2 animate-spin" />
+                  进化中...
+                </>
+              ) : (
+                <>
+                  <Dna className="w-5 h-5 mr-2" />
+                  触发进化周期
+                </>
+              )}
+            </Button>
+            {familyEvolutions.length > 0 && (familyEvolutions.find(f => f.familyKey === selectedFamily)?.stats.totalEvaluations ?? 0) < 3 && (
+              <p className="text-xs text-slate-500">
+                需要至少3次评估才能触发进化
+              </p>
             )}
-          </Button>
+          </div>
         </motion.div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -496,7 +507,9 @@ export function EvolutionDashboard() {
                       <TableRow className="border-slate-700/50 hover:bg-transparent">
                         <TableHead className="text-slate-400">时间</TableHead>
                         <TableHead className="text-slate-400">家族</TableHead>
-                        <TableHead className="text-slate-400">评分</TableHead>
+                        <TableHead className="text-slate-400">AI评分</TableHead>
+                        <TableHead className="text-slate-400">人工修正</TableHead>
+                        <TableHead className="text-slate-400">反馈</TableHead>
                         <TableHead className="text-slate-400">世代</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -526,6 +539,22 @@ export function EvolutionDashboard() {
                             >
                               {evalRecord.overallScore?.toFixed(1)}
                             </span>
+                          </TableCell>
+                          <TableCell>
+                            {evalRecord.humanScoreOverride != null ? (
+                              <span className="italic text-amber-400 font-medium">
+                                {evalRecord.humanScoreOverride.toFixed(1)}
+                              </span>
+                            ) : (
+                              <span className="text-slate-600">-</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {evalRecord.humanFeedback ? (
+                              <MessageSquare className="w-4 h-4 text-amber-400" />
+                            ) : (
+                              <span className="text-slate-600">-</span>
+                            )}
                           </TableCell>
                           <TableCell className="text-slate-500 text-xs">
                             Gen-{evalRecord.evolutionGeneration || 0}
