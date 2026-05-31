@@ -41,7 +41,8 @@ function buildEvaluationPrompt(
   familyName: string,
   familyDescription: string,
   criteriaJson: string,
-  rules: { ruleContent: string; ruleType: string; dimension: string | null }[]
+  rules: { ruleContent: string; ruleType: string; dimension: string | null }[],
+  language: 'zh' | 'en' = 'en'
 ): string {
   const criteria = JSON.parse(criteriaJson) as {
     dimensions: CriterionDimension[];
@@ -82,8 +83,34 @@ function buildEvaluationPrompt(
     dynamic_rhythm: "Dynamic/Motion Design",
   };
 
+  const langInstruction = language === 'zh'
+    ? `重要：你必须用中文撰写所有文本内容（维度评注、优势、不足、建议、综合评估）。JSON的键名保持英文，但所有值（字符串内容）必须使用中文。`
+    : `Write all text content in English.`;
+
+  const jsonExample = language === 'zh'
+    ? `{
+  "dimensionScores": {${criteria.dimensions.map((d) => `"${d.key}": 0`).join(", ")}},
+  "dimensionNotes": {${criteria.dimensions.map((d) => `"${d.key}": "中文简要评注"`).join(", ")}},
+  "overallScore": 0.0,
+  "strengths": ["中文优势1", "中文优势2", "中文优势3"],
+  "weaknesses": ["中文不足1", "中文不足2"],
+  "suggestions": ["中文具体建议1", "中文具体建议2", "中文具体建议3"],
+  "evaluation": "中文综合评估段落，涵盖整体审美质量、显著元素和改进方向。"
+}`
+    : `{
+  "dimensionScores": {${criteria.dimensions.map((d) => `"${d.key}": 0`).join(", ")}},
+  "dimensionNotes": {${criteria.dimensions.map((d) => `"${d.key}": "brief note"`).join(", ")}},
+  "overallScore": 0.0,
+  "strengths": ["strength 1", "strength 2", "strength 3"],
+  "weaknesses": ["weakness 1", "weakness 2"],
+  "suggestions": ["specific actionable suggestion 1", "specific actionable suggestion 2", "specific actionable suggestion 3"],
+  "evaluation": "A detailed natural language assessment paragraph covering the overall aesthetic quality, notable elements, and areas for improvement."
+}`;
+
   return `You are an expert aesthetic evaluator specializing in ${familyNameMap[familyKey] || familyName}. 
 ${familyDescription}
+
+${langInstruction}
 
 Evaluate this image on these 5 dimensions (score each 0-10, where 0 is terrible and 10 is masterful):
 ${dimensionsList}
@@ -92,15 +119,7 @@ ${ruleContext}
 For each dimension, provide a score and brief justification. Then provide an overall assessment.
 
 Respond ONLY in valid JSON format:
-{
-  "dimensionScores": {${criteria.dimensions.map((d) => `"${d.key}": 0`).join(", ")}},
-  "dimensionNotes": {${criteria.dimensions.map((d) => `"${d.key}": "brief note"`).join(", ")}},
-  "overallScore": 0.0,
-  "strengths": ["strength 1", "strength 2", "strength 3"],
-  "weaknesses": ["weakness 1", "weakness 2"],
-  "suggestions": ["specific actionable suggestion 1", "specific actionable suggestion 2", "specific actionable suggestion 3"],
-  "evaluation": "A detailed natural language assessment paragraph covering the overall aesthetic quality, notable elements, and areas for improvement."
-}
+${jsonExample}
 
 Be specific, insightful, and constructive. Avoid generic praise. Focus on observable visual qualities.`;
 }
@@ -123,6 +142,8 @@ export async function POST(request: Request) {
     const imageFile = formData.get("image");
     const imageUrl = formData.get("imageUrl") as string | null;
     const familyKeyParam = formData.get("familyKey") as string | null;
+    const languageParam = formData.get("language") as string | null;
+    const language: 'zh' | 'en' = languageParam === 'zh' ? 'zh' : 'en';
 
     let imageBase64: string;
 
@@ -305,7 +326,8 @@ export async function POST(request: Request) {
         ruleContent: r.ruleContent,
         ruleType: r.ruleType,
         dimension: r.dimension,
-      }))
+      })),
+      language
     );
 
     const evaluationResponse = await ai.visionChat({
@@ -497,6 +519,7 @@ export async function POST(request: Request) {
         suggestions: evaluationResult.suggestions || [],
         assessment: evaluationResult.evaluation,
       },
+      language,
       modelUsed: {
         classification: familyKeyParam ? null : providerInfo.vlmModel,
         evaluation: providerInfo.vlmModel,

@@ -19,6 +19,7 @@ import {
   ArrowUpDown,
   Brain,
   Eye,
+  Languages,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -70,6 +71,7 @@ interface EvaluationResult {
   previousEvaluationId?: string
   evolutionGeneration: number
   ruleVersionUsed: string | null
+  language?: 'zh' | 'en'
   modelUsed?: {
     classification?: string | null
     evaluation?: string | null
@@ -99,6 +101,40 @@ function getProgressBg(score: number): string {
   return '[&>div]:bg-rose-500'
 }
 
+// Bilingual labels for evaluation result sections
+const LABELS = {
+  zh: {
+    overallScore: '综合评分',
+    confidence: '置信度',
+    generation: '世代',
+    rule: '规则',
+    classification: '分类',
+    evaluation: '评估',
+    dimensionScores: '维度评分',
+    strengths: '优势',
+    weaknesses: '不足',
+    suggestions: '改进建议',
+    fullAssessment: '完整评估',
+    comparisonWithPrevious: '与上次评估的对比',
+    vsLast: '较上次',
+  },
+  en: {
+    overallScore: 'Overall Score',
+    confidence: 'Confidence',
+    generation: 'Gen',
+    rule: 'Rule',
+    classification: 'Classify',
+    evaluation: 'Evaluate',
+    dimensionScores: 'Dimension Scores',
+    strengths: 'Strengths',
+    weaknesses: 'Weaknesses',
+    suggestions: 'Suggestions',
+    fullAssessment: 'Full Assessment',
+    comparisonWithPrevious: 'Comparison with Previous',
+    vsLast: 'vs last',
+  },
+} as const
+
 const FAMILY_DISPLAY_NAMES: Record<string, string> = {
   narrative_visual: '叙事视觉',
   interactive_ui: '交互界面',
@@ -109,6 +145,7 @@ const FAMILY_DISPLAY_NAMES: Record<string, string> = {
 }
 
 type ImageSource = 'upload' | 'url'
+type EvalLanguage = 'zh' | 'en'
 
 interface EvaluatorSectionProps {
   preselectedFamily: string | null
@@ -130,12 +167,23 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false)
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false)
   const [reevaluating, setReevaluating] = useState(false)
+  const [evalLang, setEvalLang] = useState<EvalLanguage>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('eval-lang') as EvalLanguage) || 'zh'
+    }
+    return 'zh'
+  })
 
   useEffect(() => {
     if (preselectedFamily) {
       setFamilyKey(preselectedFamily)
     }
   }, [preselectedFamily])
+
+  // Persist language preference
+  useEffect(() => {
+    localStorage.setItem('eval-lang', evalLang)
+  }, [evalLang])
 
   const handleFileSelect = useCallback((file: File) => {
     if (!file.type.startsWith('image/')) {
@@ -202,6 +250,7 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
       if (familyKey && familyKey !== 'auto') {
         formData.append('familyKey', familyKey)
       }
+      formData.append('language', evalLang)
 
       const res = await fetch('/api/evaluate', {
         method: 'POST',
@@ -231,7 +280,7 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
       const res = await fetch('/api/reevaluate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ evaluationId: result.id }),
+        body: JSON.stringify({ evaluationId: result.id, language: evalLang }),
       })
 
       if (!res.ok) {
@@ -273,6 +322,10 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
       note: notes[dim.key] || '',
     }))
   }
+
+  // Helper to get label based on result language
+  const resultLang = result?.language || evalLang
+  const L = LABELS[resultLang] || LABELS.zh
 
   return (
     <section className="relative py-24 px-4" id="evaluator">
@@ -442,6 +495,38 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
                   </div>
                 )}
 
+                {/* Language toggle */}
+                <div className="mt-4 flex items-center justify-between">
+                  <label className="text-sm text-slate-400 flex items-center gap-1.5">
+                    <Languages className="w-4 h-4" />
+                    评估语言
+                  </label>
+                  <div className="flex items-center bg-slate-800/60 rounded-lg p-0.5 border border-slate-700/50">
+                    <button
+                      type="button"
+                      onClick={() => setEvalLang('zh')}
+                      className={`px-3 py-1 text-xs font-medium rounded-md transition-all duration-200 ${
+                        evalLang === 'zh'
+                          ? 'bg-amber-500 text-slate-950 shadow-sm'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      中文
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEvalLang('en')}
+                      className={`px-3 py-1 text-xs font-medium rounded-md transition-all duration-200 ${
+                        evalLang === 'en'
+                          ? 'bg-amber-500 text-slate-950 shadow-sm'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      English
+                    </button>
+                  </div>
+                </div>
+
                 {/* Family selector */}
                 <div className="mt-6">
                   <label className="text-sm text-slate-400 mb-2 block">
@@ -522,6 +607,24 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
               >
                 <Card className="bg-slate-900/80 border-slate-700/50 backdrop-blur-sm">
                   <CardContent className="p-6 space-y-6">
+                    {/* Language indicator + quick toggle */}
+                    <div className="flex items-center justify-between">
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 border-slate-600 text-slate-400 bg-slate-800/50">
+                        <Languages className="w-3 h-3 mr-1" />
+                        {resultLang === 'zh' ? '中文评估' : 'English Evaluation'}
+                      </Badge>
+                      {resultLang !== evalLang && (
+                        <button
+                          type="button"
+                          onClick={handleEvaluate}
+                          className="text-[11px] text-amber-400 hover:text-amber-300 transition-colors flex items-center gap-1"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          {evalLang === 'zh' ? '切换为中文重新评估' : 'Re-evaluate in English'}
+                        </button>
+                      )}
+                    </div>
+
                     {/* Overall Score */}
                     <div className="text-center">
                       <div className="inline-flex items-center justify-center w-24 h-24 rounded-full border-4 border-slate-700 mb-3">
@@ -529,21 +632,21 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
                           {result.evaluation.overallScore?.toFixed(1) ?? '-'}
                         </span>
                       </div>
-                      <p className="text-slate-400 text-sm">综合评分</p>
+                      <p className="text-slate-400 text-sm">{L.overallScore}</p>
                       {result.classification && (
                         <Badge variant="outline" className="mt-2 border-amber-500/30 text-amber-300 bg-amber-500/5">
                           {FAMILY_DISPLAY_NAMES[result.classification.familyKey] || result.classification.familyKey}
                           {result.classification.confidence > 0 && (
                             <span className="ml-1 opacity-70">
-                              (置信度: {(result.classification.confidence * 100).toFixed(0)}%)
+                              ({L.confidence}: {(result.classification.confidence * 100).toFixed(0)}%)
                             </span>
                           )}
                         </Badge>
                       )}
                       {result.evolutionGeneration > 0 && (
                         <p className="text-xs text-slate-500 mt-1.5">
-                          世代 Gen-{result.evolutionGeneration}
-                          {result.ruleVersionUsed && ` · 规则 ${result.ruleVersionUsed}`}
+                          {L.generation} Gen-{result.evolutionGeneration}
+                          {result.ruleVersionUsed && ` · ${L.rule} ${result.ruleVersionUsed}`}
                         </p>
                       )}
                       {/* Model used badge */}
@@ -552,13 +655,13 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
                           {result.modelUsed.classification && (
                             <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 border-violet-500/20 text-violet-300 bg-violet-500/5">
                               <Eye className="w-3 h-3 mr-1" />
-                              分类: {result.modelUsed.classification.includes('v') || result.modelUsed.classification.includes('V') ? 'VLM' : 'LLM'}
+                              {L.classification}: {result.modelUsed.classification.includes('v') || result.modelUsed.classification.includes('V') ? 'VLM' : 'LLM'}
                             </Badge>
                           )}
                           {result.modelUsed.evaluation && (
                             <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 border-amber-500/20 text-amber-300 bg-amber-500/5">
                               <Brain className="w-3 h-3 mr-1" />
-                              评估: {result.modelUsed.evaluation.includes('v') || result.modelUsed.evaluation.includes('V') ? 'VLM' : 'LLM'}
+                              {L.evaluation}: {result.modelUsed.evaluation.includes('v') || result.modelUsed.evaluation.includes('V') ? 'VLM' : 'LLM'}
                             </Badge>
                           )}
                         </div>
@@ -579,7 +682,7 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
                             }`}
                           >
                             <ArrowUpDown className="w-3 h-3 mr-1" />
-                            较上次 {result.scoreDelta > 0 ? '+' : ''}{result.scoreDelta}
+                            {L.vsLast} {result.scoreDelta > 0 ? '+' : ''}{result.scoreDelta}
                           </Badge>
                         </motion.div>
                       )}
@@ -590,7 +693,7 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
                     {/* Dimension Scores */}
                     <div>
                       <h4 className="text-sm font-medium text-slate-300 mb-4">
-                        维度评分
+                        {L.dimensionScores}
                       </h4>
                       <div className="space-y-3">
                         {getDimensionsFromResult().map((dim) => (
@@ -620,7 +723,7 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
                       <div>
                         <h4 className="text-sm font-medium text-slate-300 mb-3 flex items-center gap-2">
                           <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                          优势
+                          {L.strengths}
                         </h4>
                         <ul className="space-y-1.5">
                           {result.evaluation.strengths.map((s, i) => (
@@ -638,7 +741,7 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
                       <div>
                         <h4 className="text-sm font-medium text-slate-300 mb-3 flex items-center gap-2">
                           <XCircle className="w-4 h-4 text-rose-400" />
-                          不足
+                          {L.weaknesses}
                         </h4>
                         <ul className="space-y-1.5">
                           {result.evaluation.weaknesses.map((w, i) => (
@@ -656,7 +759,7 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
                       <div>
                         <h4 className="text-sm font-medium text-slate-300 mb-3 flex items-center gap-2">
                           <Lightbulb className="w-4 h-4 text-amber-400" />
-                          改进建议
+                          {L.suggestions}
                         </h4>
                         <ul className="space-y-1.5">
                           {result.evaluation.suggestions.map((s, i) => (
@@ -675,7 +778,7 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
                     {result.evaluation.assessment && (
                       <div>
                         <h4 className="text-sm font-medium text-slate-300 mb-3">
-                          完整评估
+                          {L.fullAssessment}
                         </h4>
                         <div className="prose prose-invert prose-sm max-w-none text-slate-400 bg-slate-800/50 rounded-lg p-4 border border-slate-700/30">
                           <ReactMarkdown>{result.evaluation.assessment}</ReactMarkdown>
@@ -688,7 +791,7 @@ export function EvaluatorSection({ preselectedFamily }: EvaluatorSectionProps) {
                       <div className="bg-violet-500/5 border border-violet-500/20 rounded-lg p-4">
                         <h4 className="text-sm font-medium text-violet-300 mb-2 flex items-center gap-2">
                           <ArrowUpDown className="w-4 h-4" />
-                          与上次评估的对比
+                          {L.comparisonWithPrevious}
                         </h4>
                         <p className="text-sm text-slate-400 leading-relaxed">
                           {result.comparisonWithPrevious}

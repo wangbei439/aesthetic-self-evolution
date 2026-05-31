@@ -10,7 +10,8 @@ import { parseVLMJson } from "@/lib/ai/parse-json";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { evaluationId } = body;
+    const { evaluationId, language: languageParam } = body;
+    const language: 'zh' | 'en' = languageParam === 'zh' ? 'zh' : 'en';
 
     if (!evaluationId) {
       return NextResponse.json(
@@ -97,8 +98,36 @@ export async function POST(request: Request) {
       dynamic_rhythm: "Dynamic/Motion Design",
     };
 
+    const langInstruction = language === 'zh'
+      ? `重要：你必须用中文撰写所有文本内容（维度评注、优势、不足、建议、综合评估、与上次对比）。JSON的键名保持英文，但所有值（字符串内容）必须使用中文。`
+      : `Write all text content in English.`;
+
+    const jsonExample = language === 'zh'
+      ? `{
+  "dimensionScores": {${criteria.dimensions.map((d) => `"${d.key}": 0`).join(", ")}},
+  "dimensionNotes": {${criteria.dimensions.map((d) => `"${d.key}": "中文简要评注"`).join(", ")}},
+  "overallScore": 0.0,
+  "strengths": ["中文优势1", "中文优势2", "中文优势3"],
+  "weaknesses": ["中文不足1", "中文不足2"],
+  "suggestions": ["中文具体建议1", "中文具体建议2", "中文具体建议3"],
+  "evaluation": "中文综合评估段落。",
+  "comparisonWithPrevious": "中文简要说明与上次评估的差异"
+}`
+      : `{
+  "dimensionScores": {${criteria.dimensions.map((d) => `"${d.key}": 0`).join(", ")}},
+  "dimensionNotes": {${criteria.dimensions.map((d) => `"${d.key}": "brief note"`).join(", ")}},
+  "overallScore": 0.0,
+  "strengths": ["strength 1", "strength 2", "strength 3"],
+  "weaknesses": ["weakness 1", "weakness 2"],
+  "suggestions": ["specific actionable suggestion 1", "specific actionable suggestion 2", "specific actionable suggestion 3"],
+  "evaluation": "A detailed natural language assessment paragraph.",
+  "comparisonWithPrevious": "Brief note on how this evaluation differs from the previous one due to rule updates"
+}`;
+
     const evaluationPrompt = `You are an expert aesthetic evaluator specializing in ${familyNameMap[family.key] || family.name}. 
 ${family.description}
+
+${langInstruction}
 
 Evaluate this image on these 5 dimensions (score each 0-10, where 0 is terrible and 10 is masterful):
 ${dimensionsList}
@@ -110,16 +139,7 @@ Compare your new evaluation with the previous one and note any differences cause
 For each dimension, provide a score and brief justification. Then provide an overall assessment.
 
 Respond ONLY in valid JSON format:
-{
-  "dimensionScores": {${criteria.dimensions.map((d) => `"${d.key}": 0`).join(", ")}},
-  "dimensionNotes": {${criteria.dimensions.map((d) => `"${d.key}": "brief note"`).join(", ")}},
-  "overallScore": 0.0,
-  "strengths": ["strength 1", "strength 2", "strength 3"],
-  "weaknesses": ["weakness 1", "weakness 2"],
-  "suggestions": ["specific actionable suggestion 1", "specific actionable suggestion 2", "specific actionable suggestion 3"],
-  "evaluation": "A detailed natural language assessment paragraph.",
-  "comparisonWithPrevious": "Brief note on how this evaluation differs from the previous one due to rule updates"
-}
+${jsonExample}
 
 Be specific, insightful, and constructive. Avoid generic praise. Focus on observable visual qualities.`;
 
@@ -305,6 +325,7 @@ Be specific, insightful, and constructive. Avoid generic praise. Focus on observ
         suggestions: evaluationResult.suggestions || [],
         assessment: evaluationResult.evaluation,
       },
+      language,
       modelUsed: {
         evaluation: providerInfo.vlmModel,
       },
