@@ -422,13 +422,13 @@ export function RulesPanel() {
                       <stat.icon className={`w-4 h-4 ${stat.color}`} />
                     </div>
                     <div>
-                      <p className="text-2xl font-bold text-slate-50">
+                      <div className="text-2xl font-bold text-slate-50">
                         {loading ? (
                           <Skeleton className="h-7 w-8 bg-slate-700/50 inline-block" />
                         ) : (
                           stat.value
                         )}
-                      </p>
+                      </div>
                       <p className="text-xs text-slate-400">{stat.label}</p>
                     </div>
                   </div>
