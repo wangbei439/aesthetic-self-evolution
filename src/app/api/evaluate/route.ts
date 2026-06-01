@@ -16,16 +16,38 @@ async function fileToBase64(file: File): Promise<string> {
 // ---------------------------------------------------------------------------
 // Domain classification prompt (used when familyKey is not provided)
 // ---------------------------------------------------------------------------
-const CLASSIFICATION_PROMPT = `Analyze this image and determine which aesthetic domain it belongs to. Choose ONE from:
-- narrative_visual: Cinematic shots, film stills, game cutscenes, story-driven visuals, photography with narrative intent
-- interactive_ui: User interfaces, web pages, app screens, dashboards, game HUDs, data visualizations
-- spatial: Environments, architecture, interiors, 3D scenes, game levels, landscapes
-- character: Character designs, fashion, portraits, digital humans, cosplay, costume
-- graphic_composition: Posters, illustrations, branding, print design, logo, packaging
-- dynamic_rhythm: Motion graphics, animation frames, visual effects, dance, dynamic action scenes
+const CLASSIFICATION_PROMPT = `You are an expert aesthetic domain classifier. Analyze this image carefully and determine which ONE aesthetic family it belongs to.
 
-Respond ONLY in valid JSON format:
-{"familyKey": "one_of_the_keys_above", "confidence": 0.0_to_1.0, "detectedDomain": "brief description of detected domain"}`;
+## Aesthetic Families (choose exactly ONE):
+
+1. **narrative_visual** (叙事视觉) — Cinematic shots, film stills, game cutscenes, storytelling photography, photojournalism, editorial photography with narrative intent.
+   *Key signals*: Story being told, sequential feel, emotional moment captured, cinematic composition, dramatic lighting.
+
+2. **interactive_ui** (交互界面) — User interfaces, web pages, app screens, dashboards, game HUDs, data visualizations, wireframes.
+   *Key signals*: Buttons, menus, forms, navigation elements, data charts, layout grids, interactive components visible.
+
+3. **spatial** (空间营造) — Architecture, interiors, 3D environments, landscapes, cityscapes, room designs, game levels.
+   *Key signals*: Space/room as subject, architectural structures, depth/perspective, environment focus, NOT a person-focused shot.
+
+4. **character** (人物造型) — Character designs, fashion photography, portraits, digital humans, cosplay, costume design, figure studies.
+   *Key signals*: Person/people as primary subject, face or body prominently featured, clothing/costume focus, character sheet.
+
+5. **graphic_composition** (平面构成) — Posters, illustrations, branding, print design, logo design, packaging, typography-focused design, flat compositions.
+   *Key signals*: 2D flat design, text/typography prominent, graphic layout, brand identity, vector-style illustration, no 3D depth.
+
+6. **dynamic_rhythm** (动态韵律) — Motion graphics frames, animation stills, visual effects, dance photography, action/sports shots, dynamic movement captured.
+   *Key signals*: Motion blur, dynamic pose, implied movement, rhythm/repetition, action frozen in time, kinetic energy.
+
+## Important Discrimination Rules:
+- If an image shows a person in an environment, decide: is the PERSON the subject (→ character) or the SPACE the subject (→ spatial)?
+- If an image has text but is primarily a photograph with narrative, classify as narrative_visual, NOT graphic_composition.
+- If an image shows a UI with 3D elements, the UI dominates → interactive_ui.
+- If an image shows a building exterior/interior with people as small elements → spatial, NOT character.
+- Fashion/costume shots where the person IS the display → character.
+- Sports/action photography with dramatic movement → dynamic_rhythm.
+
+Respond ONLY in valid JSON:
+{"familyKey": "one_of_the_six_keys_above", "confidence": 0.0_to_1.0, "detectedDomain": "brief specific domain description", "reasoning": "one sentence explaining why this family was chosen"}`;
 
 // ---------------------------------------------------------------------------
 // Family-specific evaluation prompt builder

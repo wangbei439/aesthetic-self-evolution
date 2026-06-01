@@ -334,10 +334,12 @@ export async function runPipeline(options: {
         }
 
         // Evaluate using the internal evaluation function
+        // Pass reclassify=true to let VLM verify/correct the familyKey
         const evalResult = await evaluateImageInternal({
           imageBase64,
           familyKey: item.familyKey || undefined,
           language,
+          reclassify: true,
         });
 
         if (evalResult.error) {
@@ -350,6 +352,7 @@ export async function runPipeline(options: {
           result.itemsFailed++;
         } else {
           // Update CrawledItem with evaluation results
+          // If reclassified, the familyKey and familyId will reflect the VLM's correction
           await db.crawledItem.update({
             where: { id: item.id },
             data: {
@@ -358,8 +361,17 @@ export async function runPipeline(options: {
               overallScore: evalResult.overallScore,
               familyKey: evalResult.familyKey,
               familyId: evalResult.familyId,
+              classificationConfidence: evalResult.domainConfidence || 0,
             },
           });
+
+          // Log reclassification events for tracking
+          if (evalResult.reclassified && evalResult.originalFamilyKey) {
+            console.log(
+              `[pipeline] Item ${item.id} reclassified: ${evalResult.originalFamilyKey} → ${evalResult.familyKey}`
+            );
+          }
+
           result.itemsEvaluated++;
         }
       } catch (evalError) {

@@ -121,6 +121,7 @@ interface CrawledItem {
   overallScore: number | null
   sourceId: string | null
   sourceName?: string
+  classificationConfidence?: number
   createdAt: string
 }
 
@@ -1423,13 +1424,27 @@ export function AutoEvolutionPanel() {
                             </p>
 
                             {/* Badges */}
-                            <div className="flex items-center gap-1.5 mb-2">
+                            <div className="flex items-center gap-1.5 mb-2 flex-wrap">
                               <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${familyColor} ${familyBg} border-slate-600/30 border`}>
                                 {familyName}
                               </Badge>
                               <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${evalCfg.color} ${evalCfg.bg} ${evalCfg.border} border`}>
                                 {evalCfg.label}
                               </Badge>
+                              {item.classificationConfidence != null && item.classificationConfidence > 0 && (
+                                <Badge
+                                  variant="outline"
+                                  className={`text-[10px] px-1.5 py-0 border ${
+                                    item.classificationConfidence >= 0.8
+                                      ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+                                      : item.classificationConfidence >= 0.5
+                                      ? 'text-amber-400 bg-amber-500/10 border-amber-500/20'
+                                      : 'text-rose-400 bg-rose-500/10 border-rose-500/20'
+                                  }`}
+                                >
+                                  {(item.classificationConfidence * 100).toFixed(0)}%
+                                </Badge>
+                              )}
                             </div>
 
                             {/* Score */}

@@ -25,23 +25,50 @@ export interface InternalEvalResult {
   suggestions: string[];
   detectedDomain?: string | null;
   domainConfidence?: number;
+  /** True if VLM reclassified the image to a different family than the one provided */
+  reclassified?: boolean;
+  /** The original familyKey before reclassification */
+  originalFamilyKey?: string;
   error?: string;
 }
 
 // ---------------------------------------------------------------------------
-// Domain classification prompt (same as evaluate route)
+// Domain classification prompt — enhanced with detailed discriminating criteria
+// and bilingual descriptions for better accuracy
 // ---------------------------------------------------------------------------
 
-const CLASSIFICATION_PROMPT = `Analyze this image and determine which aesthetic domain it belongs to. Choose ONE from:
-- narrative_visual: Cinematic shots, film stills, game cutscenes, story-driven visuals, photography with narrative intent
-- interactive_ui: User interfaces, web pages, app screens, dashboards, game HUDs, data visualizations
-- spatial: Environments, architecture, interiors, 3D scenes, game levels, landscapes
-- character: Character designs, fashion, portraits, digital humans, cosplay, costume
-- graphic_composition: Posters, illustrations, branding, print design, logo, packaging
-- dynamic_rhythm: Motion graphics, animation frames, visual effects, dance, dynamic action scenes
+const CLASSIFICATION_PROMPT = `You are an expert aesthetic domain classifier. Analyze this image carefully and determine which ONE aesthetic family it belongs to.
 
-Respond ONLY in valid JSON format:
-{"familyKey": "one_of_the_keys_above", "confidence": 0.0_to_1.0, "detectedDomain": "brief description of detected domain"}`;
+## Aesthetic Families (choose exactly ONE):
+
+1. **narrative_visual** (叙事视觉) — Cinematic shots, film stills, game cutscenes, storytelling photography, photojournalism, editorial photography with narrative intent.
+   *Key signals*: Story being told, sequential feel, emotional moment captured, cinematic composition, dramatic lighting.
+
+2. **interactive_ui** (交互界面) — User interfaces, web pages, app screens, dashboards, game HUDs, data visualizations, wireframes.
+   *Key signals*: Buttons, menus, forms, navigation elements, data charts, layout grids, interactive components visible.
+
+3. **spatial** (空间营造) — Architecture, interiors, 3D environments, landscapes, cityscapes, room designs, game levels.
+   *Key signals*: Space/room as subject, architectural structures, depth/perspective, environment focus, NOT a person-focused shot.
+
+4. **character** (人物造型) — Character designs, fashion photography, portraits, digital humans, cosplay, costume design, figure studies.
+   *Key signals*: Person/people as primary subject, face or body prominently featured, clothing/costume focus, character sheet.
+
+5. **graphic_composition** (平面构成) — Posters, illustrations, branding, print design, logo design, packaging, typography-focused design, flat compositions.
+   *Key signals*: 2D flat design, text/typography prominent, graphic layout, brand identity, vector-style illustration, no 3D depth.
+
+6. **dynamic_rhythm** (动态韵律) — Motion graphics frames, animation stills, visual effects, dance photography, action/sports shots, dynamic movement captured.
+   *Key signals*: Motion blur, dynamic pose, implied movement, rhythm/repetition, action frozen in time, kinetic energy.
+
+## Important Discrimination Rules:
+- If an image shows a person in an environment, decide: is the PERSON the subject (→ character) or the SPACE the subject (→ spatial)?
+- If an image has text but is primarily a photograph with narrative, classify as narrative_visual, NOT graphic_composition.
+- If an image shows a UI with 3D elements, the UI dominates → interactive_ui.
+- If an image shows a building exterior/interior with people as small elements → spatial, NOT character.
+- Fashion/costume shots where the person IS the display → character.
+- Sports/action photography with dramatic movement → dynamic_rhythm.
+
+Respond ONLY in valid JSON:
+{"familyKey": "one_of_the_six_keys_above", "confidence": 0.0_to_1.0, "detectedDomain": "brief specific domain description", "reasoning": "one sentence explaining why this family was chosen"}`;
 
 // ---------------------------------------------------------------------------
 // Family-specific evaluation prompt builder (same as evaluate route)
@@ -146,20 +173,23 @@ export async function evaluateImageInternal(params: {
   imageBase64: string;
   familyKey?: string; // if null, auto-classify
   language?: 'zh' | 'en';
+  /** When true, always verify the provided familyKey with VLM classification */
+  reclassify?: boolean;
 }): Promise<InternalEvalResult> {
-  const { imageBase64, familyKey: familyKeyParam, language = 'en' } = params;
+  const { imageBase64, familyKey: familyKeyParam, language = 'en', reclassify = false } = params;
 
   try {
     // ---- Initialize AI provider ----
     const ai = await getAIProvider();
 
-    // ---- Step 1: Classify the image domain (if familyKey not provided) ----
+    // ---- Step 1: Classify the image domain ----
     let familyKey: string;
     let detectedDomain: string | null = null;
     let domainConfidence = 0;
+    let reclassified = false;
 
-    if (familyKeyParam) {
-      // Validate the provided familyKey
+    if (familyKeyParam && !reclassify) {
+      // Validate the provided familyKey without VLM verification
       const family = await db.aestheticFamily.findUnique({
         where: { key: familyKeyParam },
       });
@@ -179,7 +209,7 @@ export async function evaluateImageInternal(params: {
       }
       familyKey = familyKeyParam;
     } else {
-      // Auto-classify using VLM
+      // Auto-classify using VLM (either no familyKey provided, or reclassify=true)
       const classificationResponse = await ai.visionChat({
         messages: [
           {
@@ -197,6 +227,7 @@ export async function evaluateImageInternal(params: {
         familyKey: string;
         confidence: number;
         detectedDomain: string;
+        reasoning?: string;
       }>(classificationText);
 
       if (!classificationResult || !classificationResult.familyKey) {
@@ -236,6 +267,15 @@ export async function evaluateImageInternal(params: {
           suggestions: [],
           error: `Classified to unknown family: ${classificationResult.familyKey}`,
         };
+      }
+
+      // If reclassify mode and VLM disagrees with the original familyKey,
+      // use the VLM's classification instead
+      if (reclassify && familyKeyParam && classificationResult.familyKey !== familyKeyParam) {
+        console.log(
+          `[evaluate] Reclassifying: ${familyKeyParam} → ${classificationResult.familyKey} (confidence: ${classificationResult.confidence}, reasoning: ${classificationResult.reasoning || 'N/A'})`
+        );
+        reclassified = true;
       }
 
       familyKey = classificationResult.familyKey;
@@ -458,6 +498,8 @@ export async function evaluateImageInternal(params: {
       suggestions: evaluationResult.suggestions || [],
       detectedDomain,
       domainConfidence,
+      reclassified,
+      originalFamilyKey: reclassified ? familyKeyParam : undefined,
     };
   } catch (error) {
     const message =
