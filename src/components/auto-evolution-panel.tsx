@@ -197,7 +197,7 @@ export function AutoEvolutionPanel() {
   const [itemsLoading, setItemsLoading] = useState(true)
   const [itemsFamilyFilter, setItemsFamilyFilter] = useState<string>('all')
   const [itemsStatusFilter, setItemsStatusFilter] = useState<string>('all')
-  const [itemsOffset, setItemsOffset] = useState(0)
+  const itemsOffsetRef = useRef(0)
   const [itemsHasMore, setItemsHasMore] = useState(false)
   const [itemsTotal, setItemsTotal] = useState(0)
   const [itemsEvaluated, setItemsEvaluated] = useState(0)
@@ -282,12 +282,12 @@ export function AutoEvolutionPanel() {
   const fetchItems = useCallback(async (reset = true) => {
     if (reset) {
       setItemsLoading(true)
-      setItemsOffset(0)
+      itemsOffsetRef.current = 0
     }
     try {
       const params = new URLSearchParams()
       params.set('limit', String(ITEMS_PAGE_SIZE))
-      params.set('offset', reset ? '0' : String(itemsOffset))
+      params.set('offset', String(reset ? 0 : itemsOffsetRef.current))
       if (itemsFamilyFilter !== 'all') params.set('familyKey', itemsFamilyFilter)
       if (itemsStatusFilter !== 'all') params.set('evaluationStatus', itemsStatusFilter)
 
@@ -297,14 +297,14 @@ export function AutoEvolutionPanel() {
         const newItems = data.data || data.items || []
         if (reset) {
           setItems(newItems)
-          setItemsOffset(ITEMS_PAGE_SIZE)
+          itemsOffsetRef.current = ITEMS_PAGE_SIZE
         } else {
           setItems(prev => {
             const existingIds = new Set(prev.map(i => i.id))
             const unique = newItems.filter((i: CrawledItem) => !existingIds.has(i.id))
             return [...prev, ...unique]
           })
-          setItemsOffset(prev => prev + ITEMS_PAGE_SIZE)
+          itemsOffsetRef.current += ITEMS_PAGE_SIZE
         }
         setItemsHasMore(data.pagination?.hasMore ?? false)
         setItemsTotal(data.pagination?.total ?? newItems.length)
@@ -314,7 +314,7 @@ export function AutoEvolutionPanel() {
     } finally {
       setItemsLoading(false)
     }
-  }, [itemsFamilyFilter, itemsStatusFilter, itemsOffset])
+  }, [itemsFamilyFilter, itemsStatusFilter])
 
   // Fetch item stats
   const fetchItemStats = useCallback(async () => {
@@ -339,7 +339,8 @@ export function AutoEvolutionPanel() {
       fetchItems(true)
       fetchItemStats()
     }
-  }, [activeTab, itemsFamilyFilter, itemsStatusFilter, fetchItems, fetchItemStats])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, itemsFamilyFilter, itemsStatusFilter])
 
   // =========================================================================
   // Tab 4: Scheduler — Data fetching
