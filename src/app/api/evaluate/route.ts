@@ -398,6 +398,7 @@ export async function POST(request: Request) {
         domainConfidence: domainConfidence,
         overallScore: evaluationResult.overallScore || 0,
         dimensionScores: JSON.stringify(evaluationResult.dimensionScores),
+        dimensionNotes: JSON.stringify(evaluationResult.dimensionNotes || {}),
         evaluation: evaluationResult.evaluation || "",
         suggestions: JSON.stringify(evaluationResult.suggestions || []),
         strengths: JSON.stringify(evaluationResult.strengths || []),

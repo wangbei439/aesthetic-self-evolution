@@ -46,6 +46,7 @@ export class OpenAICompatibleProvider implements AIProvider {
         Authorization: `Bearer ${this.config.apiKey}`,
       },
       body: JSON.stringify({ model, messages }),
+      signal: AbortSignal.timeout(120000), // 2 min timeout for chat
     });
 
     if (!response.ok) {
@@ -86,6 +87,7 @@ export class OpenAICompatibleProvider implements AIProvider {
         Authorization: `Bearer ${this.config.apiKey}`,
       },
       body: JSON.stringify({ model, messages }),
+      signal: AbortSignal.timeout(120000), // 2 min timeout for vision
     });
 
     if (!response.ok) {

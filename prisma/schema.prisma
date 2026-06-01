@@ -40,6 +40,7 @@ model AestheticEvaluation {
   // 评估结果 (JSON)
   overallScore   Float @default(0)   // 总分 0-10
   dimensionScores String            // JSON: 各维度评分 {composition: 8, color: 7, ...}
+  dimensionNotes  String @default("{}")  // JSON: 各维度备注 {composition: "良好配色", ...}
   evaluation      String            // 自然语言评估
   suggestions     String            // JSON: 改进建议列表
   strengths       String            // JSON: 优点列表
@@ -131,7 +132,7 @@ model CrawlSource {
 model CrawlTask {
   id          String   @id @default(cuid())
   sourceId    String
-  source      CrawlSource @relation(fields: [sourceId], references: [id])
+  source      CrawlSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   
   status      String @default("pending")  // pending | running | completed | failed
   startedAt   DateTime?
@@ -164,9 +165,9 @@ model CrawlTask {
 model CrawledItem {
   id          String   @id @default(cuid())
   sourceId    String?
-  source      CrawlSource? @relation(fields: [sourceId], references: [id])
+  source      CrawlSource? @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   taskId      String?
-  task        CrawlTask? @relation(fields: [taskId], references: [id])
+  task        CrawlTask? @relation(fields: [taskId], references: [id], onDelete: Cascade)
   
   // 内容信息
   imageUrl    String             // 图片URL

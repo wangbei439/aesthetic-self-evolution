@@ -5,7 +5,8 @@
 // All code using z-ai-web-dev-sdk is backend-only.
 // ---------------------------------------------------------------------------
 
-import ZAI from 'z-ai-web-dev-sdk';
+// z-ai-web-dev-sdk is loaded dynamically to avoid crash if SDK is not installed
+// (e.g. when a different AI provider is configured)
 
 // ---------------------------------------------------------------------------
 // Types
@@ -37,6 +38,7 @@ let zaiInstance: any = null;
 
 async function getZAI() {
   if (!zaiInstance) {
+    const { default: ZAI } = await import('z-ai-web-dev-sdk');
     zaiInstance = await ZAI.create();
   }
   return zaiInstance;

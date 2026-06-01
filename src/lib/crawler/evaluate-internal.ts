@@ -356,6 +356,7 @@ export async function evaluateImageInternal(params: {
         domainConfidence: domainConfidence,
         overallScore: evaluationResult.overallScore || 0,
         dimensionScores: JSON.stringify(evaluationResult.dimensionScores),
+        dimensionNotes: JSON.stringify(evaluationResult.dimensionNotes || {}),
         evaluation: evaluationResult.evaluation || '',
         suggestions: JSON.stringify(evaluationResult.suggestions || []),
         strengths: JSON.stringify(evaluationResult.strengths || []),

@@ -327,8 +327,13 @@ export function RulesPanel() {
   // ---------------------------------------------------------------------------
   const getSourceFamilyNameFromRule = (rule: Rule): string => {
     if (rule.sourceType !== 'transferred' || !rule.sourceFamilyId) return ''
+    // sourceFamilyId is a database CUID, so match against family.id, not family.key
+    const byId = families.find((f) => f.id === rule.sourceFamilyId)
+    if (byId) return byId.name
+    // Fallback: try matching by key (in case older data stored keys)
     const byKey = families.find((f) => f.key === rule.sourceFamilyId)
     if (byKey) return byKey.name
+    // Last resort: try finding a rule in the source family
     const sourceRule = rules.find((r) => r.familyId === rule.sourceFamilyId)
     if (sourceRule) return sourceRule.family.name
     return rule.sourceFamilyId

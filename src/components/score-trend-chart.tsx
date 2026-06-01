@@ -65,10 +65,10 @@ const FAMILY_LINE_COLORS: Record<string, string> = {
 const FAMILY_NAMES: Record<string, string> = {
   narrative_visual: '叙事视觉',
   interactive_ui: '交互界面',
-  spatial: '空间感知',
-  character: '角色表现',
-  graphic_composition: '图形构图',
-  dynamic_rhythm: '动态节奏',
+  spatial: '空间营造',
+  character: '人物造型',
+  graphic_composition: '平面构成',
+  dynamic_rhythm: '动态韵律',
 }
 
 const ALL_FAMILY_KEYS = Object.keys(FAMILY_LINE_COLORS)

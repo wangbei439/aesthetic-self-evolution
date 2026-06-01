@@ -79,19 +79,30 @@ import {
 
 interface PipelineStatus {
   phase: 'idle' | 'discovering' | 'evaluating' | 'evolving' | 'complete' | 'error'
+  currentFamily: string | null
   current: number
   total: number
   lastRunAt: string | null
-  lastResult: string | null
+  lastResult: {
+    taskId?: string
+    itemsDiscovered?: number
+    itemsEvaluated?: number
+    itemsFailed?: number
+    itemsSkipped?: number
+    evolutionTriggered?: boolean
+    rulesCreated?: number
+    rulesDeprecated?: number
+    duration?: number
+  } | null
   isRunning: boolean
-  logs: string[]
+  error: string | null
 }
 
 interface CrawlSource {
   id: string
   name: string
   type: string
-  familyKey: string
+  familyKey: string | null
   query: string | null
   maxItems: number
   status: string
@@ -105,7 +116,7 @@ interface CrawledItem {
   id: string
   imageUrl: string | null
   title: string | null
-  familyKey: string
+  familyKey: string | null
   evaluationStatus: string
   overallScore: number | null
   sourceId: string | null
@@ -227,8 +238,18 @@ export function AutoEvolutionPanel() {
       const res = await fetch('/api/crawl/status')
       if (res.ok) {
         const data = await res.json()
-        setPipelineStatus(data.data || data)
-        setPipelineRunning(data.data?.isRunning || data.isRunning || false)
+        const raw = data.data || data
+        setPipelineStatus({
+          phase: raw.currentPhase || 'idle',
+          currentFamily: raw.currentFamily || null,
+          current: raw.progress?.current || 0,
+          total: raw.progress?.total || 0,
+          lastRunAt: raw.lastRunAt,
+          lastResult: raw.lastResult,
+          isRunning: raw.isRunning || false,
+          error: raw.error || null,
+        })
+        setPipelineRunning(raw.isRunning || false)
       }
     } catch {
       // silently ignore
@@ -243,12 +264,12 @@ export function AutoEvolutionPanel() {
     return () => clearInterval(interval)
   }, [fetchPipelineStatus])
 
-  // Auto-scroll log
+  // Auto-scroll log panel when status changes
   useEffect(() => {
     if (pipelineLogRef.current) {
       pipelineLogRef.current.scrollTop = pipelineLogRef.current.scrollHeight
     }
-  }, [pipelineStatus?.logs])
+  }, [pipelineStatus?.phase, pipelineStatus?.current, pipelineStatus?.currentFamily])
 
   // =========================================================================
   // Tab 2: Data Sources — Data fetching
@@ -339,8 +360,7 @@ export function AutoEvolutionPanel() {
       fetchItems(true)
       fetchItemStats()
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, itemsFamilyFilter, itemsStatusFilter])
+  }, [activeTab, itemsFamilyFilter, itemsStatusFilter, fetchItems, fetchItemStats])
 
   // =========================================================================
   // Tab 4: Scheduler — Data fetching
@@ -502,7 +522,7 @@ export function AutoEvolutionPanel() {
       const res = await fetch('/api/crawl/seed')
       if (!res.ok) throw new Error('Seed失败')
       const data = await res.json()
-      toast.success(`已种入 ${(data.data?.length || 0)} 个默认数据源`)
+      toast.success(`已种入 ${data.data?.created || 0} 个默认数据源${data.data?.skipped ? `，跳过 ${data.data.skipped} 个已存在` : ''}`)
       await fetchSources()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Seed失败')
@@ -701,23 +721,58 @@ export function AutoEvolutionPanel() {
                         </div>
                       )}
 
+                      {/* Current family */}
+                      {pipelineStatus?.currentFamily && pipelineRunning && (
+                        <div className="text-xs text-slate-400 flex items-center gap-1.5">
+                          <span className={FAMILY_DOT[pipelineStatus.currentFamily] || 'bg-slate-400'} />
+                          当前家族: <span className="text-slate-200 font-medium">{FAMILY_NAMES[pipelineStatus.currentFamily] || pipelineStatus.currentFamily}</span>
+                        </div>
+                      )}
+
                       {/* Last run info */}
                       {pipelineStatus?.lastRunAt && (
-                        <div className="text-xs text-slate-500 flex items-center gap-2">
-                          <Clock className="w-3 h-3" />
-                          上次运行: {new Date(pipelineStatus.lastRunAt).toLocaleString('zh-CN')}
+                        <div className="space-y-1">
+                          <div className="text-xs text-slate-500 flex items-center gap-2">
+                            <Clock className="w-3 h-3" />
+                            上次运行: {new Date(pipelineStatus.lastRunAt).toLocaleString('zh-CN')}
+                            {pipelineStatus.lastResult && (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] px-1.5 py-0 text-emerald-400 bg-emerald-500/10 border-emerald-500/20 border"
+                              >
+                                完成
+                              </Badge>
+                            )}
+                          </div>
                           {pipelineStatus.lastResult && (
-                            <Badge
-                              variant="outline"
-                              className={`text-[10px] px-1.5 py-0 ${
-                                pipelineStatus.lastResult === 'success'
-                                  ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
-                                  : 'text-rose-400 bg-rose-500/10 border-rose-500/20'
-                              } border`}
-                            >
-                              {pipelineStatus.lastResult === 'success' ? '成功' : '失败'}
-                            </Badge>
+                            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500">
+                              {pipelineStatus.lastResult.itemsDiscovered !== undefined && (
+                                <span>发现: <span className="text-cyan-400">{pipelineStatus.lastResult.itemsDiscovered}</span></span>
+                              )}
+                              {pipelineStatus.lastResult.itemsEvaluated !== undefined && (
+                                <span>评估: <span className="text-amber-400">{pipelineStatus.lastResult.itemsEvaluated}</span></span>
+                              )}
+                              {pipelineStatus.lastResult.itemsFailed !== undefined && pipelineStatus.lastResult.itemsFailed > 0 && (
+                                <span>失败: <span className="text-rose-400">{pipelineStatus.lastResult.itemsFailed}</span></span>
+                              )}
+                              {pipelineStatus.lastResult.evolutionTriggered && (
+                                <span>进化: <span className="text-violet-400">已触发</span></span>
+                              )}
+                              {pipelineStatus.lastResult.rulesCreated !== undefined && pipelineStatus.lastResult.rulesCreated > 0 && (
+                                <span>新规则: <span className="text-emerald-400">{pipelineStatus.lastResult.rulesCreated}</span></span>
+                              )}
+                              {pipelineStatus.lastResult.duration !== undefined && (
+                                <span>耗时: <span className="text-slate-300">{(pipelineStatus.lastResult.duration / 1000).toFixed(1)}s</span></span>
+                              )}
+                            </div>
                           )}
+                        </div>
+                      )}
+
+                      {/* Error display */}
+                      {pipelineStatus?.error && (
+                        <div className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2">
+                          {pipelineStatus.error}
                         </div>
                       )}
                     </>
@@ -815,7 +870,7 @@ export function AutoEvolutionPanel() {
                         min={1}
                         max={50}
                         value={maxItems}
-                        onChange={(e) => setMaxItems(Number(e.target.value) || 5)}
+                        onChange={(e) => setMaxItems(Math.min(50, Math.max(1, Number(e.target.value) || 5)))}
                         className="bg-slate-800/50 border-slate-600 text-slate-200 h-9 w-24"
                       />
                     </div>
@@ -824,7 +879,7 @@ export function AutoEvolutionPanel() {
               </Card>
             </motion.div>
 
-            {/* Live Log */}
+            {/* Pipeline Details */}
             <motion.div
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
@@ -834,7 +889,7 @@ export function AutoEvolutionPanel() {
                 <CardHeader>
                   <CardTitle className="text-slate-200 flex items-center gap-2 text-base">
                     <Activity className="w-5 h-5 text-amber-400" />
-                    实时日志
+                    Pipeline 详情
                     {pipelineRunning && (
                       <motion.div
                         className="w-2 h-2 rounded-full bg-emerald-400 ml-auto"
@@ -847,18 +902,104 @@ export function AutoEvolutionPanel() {
                 <CardContent>
                   <div
                     ref={pipelineLogRef}
-                    className="h-64 overflow-y-auto custom-scrollbar space-y-1 pr-1 bg-slate-950/50 rounded-lg p-3 border border-slate-800/50"
+                    className="h-64 overflow-y-auto custom-scrollbar space-y-3 pr-1 bg-slate-950/50 rounded-lg p-3 border border-slate-800/50"
                   >
-                    {pipelineStatus?.logs && pipelineStatus.logs.length > 0 ? (
-                      pipelineStatus.logs.map((log, i) => (
-                        <div key={i} className="text-xs font-mono text-slate-400 leading-relaxed">
-                          <span className="text-slate-600 mr-2">{String(i + 1).padStart(3, '0')}</span>
-                          {log}
+                    {/* Phase detail */}
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full ${phaseConfig.bg} border ${phaseConfig.border}`} />
+                      <span className="text-xs text-slate-400">阶段:</span>
+                      <span className={`text-xs font-medium ${phaseConfig.color}`}>{phaseConfig.label}</span>
+                    </div>
+
+                    {/* Current family */}
+                    {pipelineStatus?.currentFamily && (
+                      <div className="flex items-center gap-2">
+                        <span className={`w-2 h-2 rounded-full ${FAMILY_DOT[pipelineStatus.currentFamily] || 'bg-slate-400'}`} />
+                        <span className="text-xs text-slate-400">家族:</span>
+                        <span className="text-xs text-slate-200 font-medium">{FAMILY_NAMES[pipelineStatus.currentFamily] || pipelineStatus.currentFamily}</span>
+                      </div>
+                    )}
+
+                    {/* Progress detail */}
+                    {(pipelineStatus?.total ?? 0) > 0 && (
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-400">进度:</span>
+                          <span className="text-xs text-slate-200">{pipelineStatus?.current ?? 0}/{pipelineStatus?.total ?? 0}</span>
                         </div>
-                      ))
-                    ) : (
+                        <Progress
+                          value={pipelineStatus?.total ? (pipelineStatus.current / pipelineStatus.total) * 100 : 0}
+                          className="h-1.5 bg-slate-700/50 [&>div]:bg-violet-500"
+                        />
+                      </div>
+                    )}
+
+                    {/* Last result summary */}
+                    {pipelineStatus?.lastResult && (
+                      <div className="space-y-1.5 pt-2 border-t border-slate-800/50">
+                        <span className="text-xs text-slate-500 font-medium">上次运行结果</span>
+                        {pipelineStatus.lastResult.itemsDiscovered !== undefined && (
+                          <div className="text-xs text-slate-400 flex justify-between">
+                            <span>发现图片</span>
+                            <span className="text-cyan-400">{pipelineStatus.lastResult.itemsDiscovered}</span>
+                          </div>
+                        )}
+                        {pipelineStatus.lastResult.itemsEvaluated !== undefined && (
+                          <div className="text-xs text-slate-400 flex justify-between">
+                            <span>评估完成</span>
+                            <span className="text-amber-400">{pipelineStatus.lastResult.itemsEvaluated}</span>
+                          </div>
+                        )}
+                        {pipelineStatus.lastResult.itemsFailed !== undefined && (
+                          <div className="text-xs text-slate-400 flex justify-between">
+                            <span>评估失败</span>
+                            <span className="text-rose-400">{pipelineStatus.lastResult.itemsFailed}</span>
+                          </div>
+                        )}
+                        {pipelineStatus.lastResult.itemsSkipped !== undefined && (
+                          <div className="text-xs text-slate-400 flex justify-between">
+                            <span>跳过</span>
+                            <span className="text-slate-300">{pipelineStatus.lastResult.itemsSkipped}</span>
+                          </div>
+                        )}
+                        {pipelineStatus.lastResult.evolutionTriggered && (
+                          <div className="text-xs text-slate-400 flex justify-between">
+                            <span>进化触发</span>
+                            <span className="text-violet-400">是</span>
+                          </div>
+                        )}
+                        {pipelineStatus.lastResult.rulesCreated !== undefined && (
+                          <div className="text-xs text-slate-400 flex justify-between">
+                            <span>新规则</span>
+                            <span className="text-emerald-400">{pipelineStatus.lastResult.rulesCreated}</span>
+                          </div>
+                        )}
+                        {pipelineStatus.lastResult.rulesDeprecated !== undefined && (
+                          <div className="text-xs text-slate-400 flex justify-between">
+                            <span>废弃规则</span>
+                            <span className="text-rose-400">{pipelineStatus.lastResult.rulesDeprecated}</span>
+                          </div>
+                        )}
+                        {pipelineStatus.lastResult.duration !== undefined && (
+                          <div className="text-xs text-slate-400 flex justify-between">
+                            <span>耗时</span>
+                            <span className="text-slate-300">{(pipelineStatus.lastResult.duration / 1000).toFixed(1)}s</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Error */}
+                    {pipelineStatus?.error && (
+                      <div className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded px-2 py-1.5">
+                        {pipelineStatus.error}
+                      </div>
+                    )}
+
+                    {/* Empty state */}
+                    {!pipelineRunning && !pipelineStatus?.lastResult && !pipelineStatus?.error && (
                       <div className="text-center py-8 text-slate-600 text-xs">
-                        暂无日志，启动Pipeline后自动显示
+                        空闲状态，启动Pipeline后显示详情
                       </div>
                     )}
                   </div>
@@ -1087,7 +1228,7 @@ export function AutoEvolutionPanel() {
                     min={1}
                     max={50}
                     value={newSource.maxItems}
-                    onChange={(e) => setNewSource(prev => ({ ...prev, maxItems: Number(e.target.value) || 5 }))}
+                    onChange={(e) => setNewSource(prev => ({ ...prev, maxItems: Math.min(50, Math.max(1, Number(e.target.value) || 5)) }))}
                     className="bg-slate-800/50 border-slate-600 text-slate-200 w-24"
                   />
                 </div>
@@ -1541,7 +1682,7 @@ export function AutoEvolutionPanel() {
                       min={1}
                       max={50}
                       value={schedulerConfig.maxItemsPerFamily}
-                      onChange={(e) => setSchedulerConfig(prev => ({ ...prev, maxItemsPerFamily: Number(e.target.value) || 5 }))}
+                      onChange={(e) => setSchedulerConfig(prev => ({ ...prev, maxItemsPerFamily: Math.min(50, Math.max(1, Number(e.target.value) || 5)) }))}
                       className="bg-slate-800/50 border-slate-600 text-slate-200 w-32"
                     />
                   </div>

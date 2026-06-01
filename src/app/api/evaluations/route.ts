@@ -2,6 +2,14 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
 // ---------------------------------------------------------------------------
+// Safe JSON parse helper
+// ---------------------------------------------------------------------------
+function safeJsonParse(str: string | null | undefined, fallback: unknown = null) {
+  if (!str) return fallback;
+  try { return JSON.parse(str); } catch { return fallback; }
+}
+
+// ---------------------------------------------------------------------------
 // GET /api/evaluations — Paginated evaluation history
 // Query params:
 //   familyId  (optional) — filter by family ID
@@ -71,14 +79,15 @@ export async function GET(request: Request) {
       detectedDomain: e.detectedDomain,
       domainConfidence: e.domainConfidence,
       overallScore: e.overallScore,
-      dimensionScores: JSON.parse(e.dimensionScores),
+      dimensionScores: safeJsonParse(e.dimensionScores, {}),
+      dimensionNotes: safeJsonParse(e.dimensionNotes, {}),
       evaluation: e.evaluation,
-      strengths: JSON.parse(e.strengths),
-      weaknesses: JSON.parse(e.weaknesses),
-      suggestions: JSON.parse(e.suggestions),
+      strengths: safeJsonParse(e.strengths, []),
+      weaknesses: safeJsonParse(e.weaknesses, []),
+      suggestions: safeJsonParse(e.suggestions, []),
       evolutionGeneration: e.evolutionGeneration,
       ruleVersionUsed: e.ruleVersionUsed,
-      humanFeedback: e.humanFeedback ? JSON.parse(e.humanFeedback) : null,
+      humanFeedback: safeJsonParse(e.humanFeedback),
       humanScoreOverride: e.humanScoreOverride,
       createdAt: e.createdAt,
       updatedAt: e.updatedAt,

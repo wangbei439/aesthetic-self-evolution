@@ -19,13 +19,26 @@ export function parseVLMJson<T = unknown>(text: string): T | null {
         // continue to next strategy
       }
     }
-    // Try to find the first { ... } block
-    const braceMatch = text.match(/\{[\s\S]*\}/);
-    if (braceMatch) {
-      try {
-        return JSON.parse(braceMatch[0]) as T;
-      } catch {
-        // give up
+    // Try to find the first balanced { ... } block (non-greedy)
+    // We use a balanced-brace approach instead of greedy .* to avoid
+    // matching across multiple JSON objects in the same text
+    let depth = 0;
+    let start = -1;
+    for (let i = 0; i < text.length; i++) {
+      if (text[i] === '{') {
+        if (depth === 0) start = i;
+        depth++;
+      } else if (text[i] === '}') {
+        depth--;
+        if (depth === 0 && start !== -1) {
+          const candidate = text.slice(start, i + 1);
+          try {
+            return JSON.parse(candidate) as T;
+          } catch {
+            // This balanced block wasn't valid JSON, keep searching
+            start = -1;
+          }
+        }
       }
     }
     return null;

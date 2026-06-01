@@ -107,7 +107,7 @@ export async function GET() {
             eventType: e.eventType,
             description: e.description,
             generation: e.generation,
-            metadata: e.metadata ? JSON.parse(e.metadata) : null,
+            metadata: e.metadata ? (() => { try { return JSON.parse(e.metadata); } catch { return null; } })() : null,
             createdAt: e.createdAt,
           })),
         };
@@ -200,18 +200,18 @@ export async function POST(request: Request) {
     const currentGeneration = (latestRule?.generation || 0) + 1;
 
     // ---- Step 1: Reflection phase — analyze evaluation patterns ----
-    const criteria = JSON.parse(family.criteria) as {
+    const criteria = (() => { try { return JSON.parse(family.criteria); } catch { return { dimensions: [] }; } })() as {
       dimensions: { key: string; name: string; desc: string }[];
     };
 
     // Build summary of evaluation data for AI analysis
     const evaluationSummary = recentEvaluations.map((e, i) => {
-      const dimScores = JSON.parse(e.dimensionScores) as Record<
+      const dimScores = (() => { try { return JSON.parse(e.dimensionScores); } catch { return {}; } })() as Record<
         string,
         number
       >;
-      const strengths = JSON.parse(e.strengths) as string[];
-      const weaknesses = JSON.parse(e.weaknesses) as string[];
+      const strengths = (() => { try { return JSON.parse(e.strengths); } catch { return []; } })() as string[];
+      const weaknesses = (() => { try { return JSON.parse(e.weaknesses); } catch { return []; } })() as string[];
       return `Evaluation #${i + 1} (Score: ${e.overallScore.toFixed(1)}/10):
   Dimension scores: ${Object.entries(dimScores)
     .map(([k, v]) => `${k}=${v}`)

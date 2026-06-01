@@ -216,6 +216,7 @@ Be specific, insightful, and constructive. Avoid generic praise. Focus on observ
         domainConfidence: existingEval.domainConfidence,
         overallScore: evaluationResult.overallScore || 0,
         dimensionScores: JSON.stringify(evaluationResult.dimensionScores),
+        dimensionNotes: JSON.stringify(evaluationResult.dimensionNotes || {}),
         evaluation: evaluationResult.evaluation || "",
         suggestions: JSON.stringify(evaluationResult.suggestions || []),
         strengths: JSON.stringify(evaluationResult.strengths || []),
