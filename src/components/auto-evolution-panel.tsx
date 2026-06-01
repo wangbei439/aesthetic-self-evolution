@@ -118,7 +118,7 @@ interface SchedulerStatus {
   intervalMinutes: number
   nextRunAt: string | null
   lastRunAt: string | null
-  lastRunResult: string | null
+  lastRunResult: { success: boolean; familiesProcessed?: number; error?: string } | null
   config: {
     intervalMinutes: number
     familyKeys: string[]
@@ -1429,12 +1429,14 @@ export function AutoEvolutionPanel() {
                             <Badge
                               variant="outline"
                               className={`text-[10px] px-1.5 py-0 ${
-                                schedulerStatus.lastRunResult === 'success'
+                                schedulerStatus.lastRunResult.success
                                   ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
                                   : 'text-rose-400 bg-rose-500/10 border-rose-500/20'
                               } border`}
                             >
-                              {schedulerStatus.lastRunResult === 'success' ? '成功' : schedulerStatus.lastRunResult}
+                              {schedulerStatus.lastRunResult.success
+                                ? `成功 (${schedulerStatus.lastRunResult.familiesProcessed ?? 0}家族)`
+                                : schedulerStatus.lastRunResult.error || '失败'}
                             </Badge>
                           </div>
                         )}
