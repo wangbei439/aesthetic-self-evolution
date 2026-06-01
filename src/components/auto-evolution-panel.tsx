@@ -78,7 +78,7 @@ import {
 // ---------------------------------------------------------------------------
 
 interface PipelineStatus {
-  phase: 'idle' | 'discovering' | 'evaluating' | 'evolving' | 'complete' | 'error'
+  phase: 'idle' | 'discovering' | 'evaluating' | 'evolving' | 'complete' | 'error' | 'rate_limited'
   currentFamily: string | null
   current: number
   total: number
@@ -96,6 +96,7 @@ interface PipelineStatus {
   } | null
   isRunning: boolean
   error: string | null
+  rateLimited?: boolean
 }
 
 interface CrawlSource {
@@ -151,6 +152,7 @@ const PHASE_CONFIG: Record<string, { label: string; color: string; bg: string; b
   evolving: { label: '进化中', color: 'text-violet-400', bg: 'bg-violet-500/10', border: 'border-violet-500/20' },
   complete: { label: '完成', color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20' },
   error: { label: '错误', color: 'text-rose-400', bg: 'bg-rose-500/10', border: 'border-rose-500/20' },
+  rate_limited: { label: '频率限制', color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20' },
 }
 
 const SOURCE_TYPE_CONFIG: Record<string, { label: string; color: string; bg: string; border: string }> = {
@@ -249,6 +251,7 @@ export function AutoEvolutionPanel() {
           lastResult: raw.lastResult,
           isRunning: raw.isRunning || false,
           error: raw.error || null,
+          rateLimited: raw.rateLimited || false,
         })
         setPipelineRunning(raw.isRunning || false)
       }
@@ -775,9 +778,18 @@ export function AutoEvolutionPanel() {
                       )}
 
                       {/* Error display */}
-                      {pipelineStatus?.error && (
+                      {pipelineStatus?.error && pipelineStatus.phase !== 'rate_limited' && (
                         <div className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2">
                           {pipelineStatus.error}
+                        </div>
+                      )}
+
+                      {/* Rate limit warning */}
+                      {pipelineStatus?.phase === 'rate_limited' && (
+                        <div className="text-xs text-orange-400 bg-orange-500/10 border border-orange-500/20 rounded-lg px-3 py-2 space-y-1">
+                          <div className="font-semibold">⚠️ API 请求频率超限 (429)</div>
+                          <div>AI 服务接口调用过于频繁，请等待 3-5 分钟后重试。</div>
+                          <div className="text-orange-300/60">系统已自动添加重试和退避机制，但当前配额可能已暂时耗尽。</div>
                         </div>
                       )}
                     </>
@@ -789,8 +801,9 @@ export function AutoEvolutionPanel() {
                   <div className="flex flex-wrap gap-3">
                     <Button
                       onClick={startPipeline}
-                      disabled={pipelineRunning}
-                      className="bg-violet-600 hover:bg-violet-500 text-white font-semibold shadow-lg shadow-violet-500/20 transition-all"
+                      disabled={pipelineRunning || pipelineStatus?.phase === 'rate_limited'}
+                      className="bg-violet-600 hover:bg-violet-500 text-white font-semibold shadow-lg shadow-violet-500/20 transition-all disabled:opacity-50"
+                      title={pipelineStatus?.phase === 'rate_limited' ? '请等待API频率限制重置后再试' : ''}
                     >
                       {pipelineRunning ? (
                         <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -801,9 +814,9 @@ export function AutoEvolutionPanel() {
                     </Button>
                     <Button
                       onClick={discoverOnly}
-                      disabled={pipelineRunning}
+                      disabled={pipelineRunning || pipelineStatus?.phase === 'rate_limited'}
                       variant="outline"
-                      className="border-slate-600 text-slate-300 hover:bg-slate-800 hover:text-slate-100"
+                      className="border-slate-600 text-slate-300 hover:bg-slate-800 hover:text-slate-100 disabled:opacity-50"
                     >
                       <Search className="w-4 h-4 mr-2" />
                       仅发现

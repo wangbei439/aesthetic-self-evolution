@@ -3,10 +3,8 @@
 // ---------------------------------------------------------------------------
 // Uses z-ai-web-dev-sdk for web search and page reading.
 // All code using z-ai-web-dev-sdk is backend-only.
+// Includes global rate limiting and 429 cooldown to prevent rate limit errors.
 // ---------------------------------------------------------------------------
-
-// z-ai-web-dev-sdk is loaded dynamically to avoid crash if SDK is not installed
-// (e.g. when a different AI provider is configured)
 
 // ---------------------------------------------------------------------------
 // Types
@@ -42,6 +40,104 @@ async function getZAI() {
     zaiInstance = await ZAI.create();
   }
   return zaiInstance;
+}
+
+// ---------------------------------------------------------------------------
+// Global Rate Limiting & 429 Cooldown
+// ---------------------------------------------------------------------------
+// The z-ai-web-dev-sdk has very strict rate limits. We implement:
+// 1. Minimum interval between consecutive API calls (5 seconds)
+// 2. Global 429 cooldown: after receiving a 429, wait 60s before any new call
+// 3. Exponential backoff on retries (30s → 90s → 180s)
+// ---------------------------------------------------------------------------
+
+// Minimum interval between consecutive API calls
+const MIN_CALL_INTERVAL_MS = 5000; // 5 seconds
+
+// After a 429, how long to wait before trying ANY API call again
+const COOLDOWN_AFTER_429_MS = 60000; // 60 seconds
+
+// Global state
+let _lastCallTime = 0;
+let _last429Time = 0;
+let _consecutive429s = 0; // Track consecutive 429s to increase cooldown
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Wait until enough time has elapsed since the last API call.
+ * Also respects 429 cooldown periods.
+ */
+async function waitForRateLimit(): Promise<void> {
+  const now = Date.now();
+
+  // First, respect the 429 cooldown
+  const timeSince429 = now - _last429Time;
+  if (_last429Time > 0 && timeSince429 < COOLDOWN_AFTER_429_MS) {
+    const cooldownRemaining = COOLDOWN_AFTER_429_MS - timeSince429;
+    // Scale cooldown with consecutive 429s (max 5 minutes)
+    const scaledCooldown = Math.min(
+      cooldownRemaining * (1 + _consecutive429s * 0.5),
+      300000 // max 5 minutes
+    );
+    console.log(
+      `[discover] 429 cooldown: waiting ${Math.round(scaledCooldown / 1000)}s before next API call (consecutive 429s: ${_consecutive429s})`
+    );
+    await delay(scaledCooldown);
+  }
+
+  // Then, respect the minimum interval
+  const timeSinceLastCall = Date.now() - _lastCallTime;
+  if (timeSinceLastCall < MIN_CALL_INTERVAL_MS) {
+    const waitMs = MIN_CALL_INTERVAL_MS - timeSinceLastCall;
+    await delay(waitMs);
+  }
+
+  _lastCallTime = Date.now();
+}
+
+/**
+ * Retry a function with exponential backoff for 429 errors,
+ * with aggressive cooldown periods.
+ */
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries = 2, // Reduced from 3 to fail faster
+  baseDelayMs = 30000 // Start with 30 seconds instead of 5
+): Promise<T> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      await waitForRateLimit();
+      return await fn();
+    } catch (error: unknown) {
+      const is429 =
+        error instanceof Error &&
+        (error.message.includes('429') || error.message.includes('Too many requests'));
+
+      if (!is429 || attempt === maxRetries) throw error;
+
+      // Track 429 for global cooldown
+      _last429Time = Date.now();
+      _consecutive429s++;
+
+      const waitMs = baseDelayMs * Math.pow(2, attempt); // 30s → 60s → 120s
+      console.warn(
+        `[discover] 429 rate limited, retrying in ${waitMs / 1000}s (attempt ${attempt + 1}/${maxRetries}, consecutive 429s: ${_consecutive429s})`
+      );
+      _lastCallTime = Date.now();
+      await delay(waitMs);
+    }
+  }
+  throw new Error('Max retries exceeded');
+}
+
+/**
+ * Reset the 429 counter after a successful call.
+ */
+function reset429Counter(): void {
+  _consecutive429s = 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -125,25 +221,14 @@ const SKIP_EXTENSIONS = ['.svg', '.gif'];
 
 function isUnwantedImage(url: string): boolean {
   const lower = url.toLowerCase();
-  // Skip known unwanted patterns
   if (SKIP_PATTERNS.some((p) => lower.includes(p))) return true;
-  // Skip SVGs and GIFs (usually icons or animations, not suitable for aesthetic eval)
   if (SKIP_EXTENSIONS.some((ext) => lower.endsWith(ext))) return true;
-  // Skip very small dimension hints in URL (e.g., 50x50, 32x32)
   if (/\d{1,2}x\d{1,2}/.test(lower) && !/\d{3,}x\d{3,}/.test(lower)) return true;
   return false;
 }
 
 // ---------------------------------------------------------------------------
-// Rate-limiting helper
-// ---------------------------------------------------------------------------
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// ---------------------------------------------------------------------------
-// Search the web for aesthetic content
+// Search the web for aesthetic content (with rate limiting + retry)
 // ---------------------------------------------------------------------------
 
 export async function searchWeb(
@@ -151,8 +236,13 @@ export async function searchWeb(
   num: number = 10
 ): Promise<SearchResult[]> {
   try {
-    const zai = await getZAI();
-    const result = await zai.functions.invoke('web_search', { query, num });
+    const result = await retryWithBackoff(async () => {
+      const zai = await getZAI();
+      return await zai.functions.invoke('web_search', { query, num });
+    });
+
+    // Successful call — reset 429 counter
+    reset429Counter();
 
     if (!result || !Array.isArray(result)) {
       console.warn('[discover] web_search returned non-array:', typeof result);
@@ -171,7 +261,7 @@ export async function searchWeb(
       })
     );
   } catch (error) {
-    console.error('[discover] searchWeb error:', error);
+    console.error('[discover] searchWeb error (all retries exhausted):', error);
     return [];
   }
 }
@@ -183,62 +273,51 @@ export async function searchWeb(
 function extractImagesFromHTML(html: string): string[] {
   const images: string[] = [];
 
-  // 1. Standard <img src="...">
   const srcRegex = /src=["'](https?:\/\/[^"']+\.(jpg|jpeg|png|webp))["']/gi;
   let match: RegExpExecArray | null;
   while ((match = srcRegex.exec(html)) !== null) {
     if (!isUnwantedImage(match[1])) images.push(match[1]);
   }
 
-  // 2. data-src, data-lazy-src, data-original (lazy loading)
   const lazyRegex = /data-(?:src|lazy-src|original|image)=["'](https?:\/\/[^"']+\.(jpg|jpeg|png|webp))["']/gi;
   while ((match = lazyRegex.exec(html)) !== null) {
     if (!isUnwantedImage(match[1]) && !images.includes(match[1])) images.push(match[1]);
   }
 
-  // 3. srcset (pick the largest image URL)
   const srcsetRegex = /srcset=["']([^"']+)["']/gi;
   while ((match = srcsetRegex.exec(html)) !== null) {
     const srcset = match[1];
-    // Parse srcset: "url1 1x, url2 2x" or "url1 100w, url2 500w"
     const candidates = srcset.split(',').map((s: string) => s.trim().split(/\s+/)[0]);
-    // Pick the last (usually largest) candidate
     const bestCandidate = candidates[candidates.length - 1];
     if (bestCandidate && /\.(jpg|jpeg|png|webp)$/i.test(bestCandidate) && !isUnwantedImage(bestCandidate)) {
       if (!images.includes(bestCandidate)) images.push(bestCandidate);
     }
   }
 
-  // 4. og:image meta tag
   const ogImageRegex = /property=["']og:image["']\s+content=["'](https?:\/\/[^"']+)["']/gi;
   while ((match = ogImageRegex.exec(html)) !== null) {
     if (!isUnwantedImage(match[1]) && !images.includes(match[1])) images.push(match[1]);
   }
-  // Also: content before property
   const ogImageRegex2 = /content=["'](https?:\/\/[^"']+)["']\s+property=["']og:image["']/gi;
   while ((match = ogImageRegex2.exec(html)) !== null) {
     if (!isUnwantedImage(match[1]) && !images.includes(match[1])) images.push(match[1]);
   }
 
-  // 5. <a href="...jpg"> (links to full-size images)
   const linkImageRegex = /href=["'](https?:\/\/[^"']+\.(jpg|jpeg|png|webp))["']/gi;
   while ((match = linkImageRegex.exec(html)) !== null) {
     if (!isUnwantedImage(match[1]) && !images.includes(match[1])) images.push(match[1]);
   }
 
-  // 6. JSON-LD image URLs (common in gallery sites)
   const jsonLdRegex = /"image"\s*:\s*"(https?:\/\/[^"]+\.(jpg|jpeg|png|webp))"/gi;
   while ((match = jsonLdRegex.exec(html)) !== null) {
     if (!isUnwantedImage(match[1]) && !images.includes(match[1])) images.push(match[1]);
   }
 
-  // 7. Unsplash raw image URLs (common pattern: images.unsplash.com/photo-...)
   const unsplashRegex = /(https?:\/\/images\.unsplash\.com\/photo-[^"'\s]+\.(jpg|jpeg|png|webp)[^"'\s]*)/gi;
   while ((match = unsplashRegex.exec(html)) !== null) {
     if (!images.includes(match[1])) images.push(match[1]);
   }
 
-  // 8. General CDN image URLs with typical patterns
   const cdnRegex = /(https?:\/\/(?:cdn|img|images|media|static)\.[^"'\s]+\/[^"'\s]+\.(jpg|jpeg|png|webp))/gi;
   while ((match = cdnRegex.exec(html)) !== null) {
     if (!isUnwantedImage(match[1]) && !images.includes(match[1])) images.push(match[1]);
@@ -248,36 +327,39 @@ function extractImagesFromHTML(html: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Read a web page and extract image URLs (with timeout)
+// Read a web page and extract image URLs (with rate limiting + retry)
 // ---------------------------------------------------------------------------
 
 export async function readPageAndExtractImages(
   url: string
 ): Promise<{ title: string; images: string[]; description: string }> {
   try {
-    const zai = await getZAI();
+    const result = await retryWithBackoff(async () => {
+      const zai = await getZAI();
 
-    // Add timeout protection (15 seconds)
-    const timeoutPromise = new Promise<{ title: string; images: string[]; description: string }>(
-      (resolve) => setTimeout(() => resolve({ title: '', images: [], description: '' }), 15000)
-    );
+      // Add timeout protection (15 seconds)
+      const timeoutPromise = new Promise<{ title: string; images: string[]; description: string }>(
+        (resolve) => setTimeout(() => resolve({ title: '', images: [], description: '' }), 15000)
+      );
 
-    const readPromise = zai.functions.invoke('page_reader', { url });
+      const readPromise = zai.functions.invoke('page_reader', { url });
 
-    const result = await Promise.race([readPromise, timeoutPromise]);
+      return Promise.race([readPromise, timeoutPromise]);
+    });
+
+    // Successful call — reset 429 counter
+    reset429Counter();
 
     if (!result) {
       return { title: '', images: [], description: '' };
     }
 
-    // page_reader returns { code, data: { title, html, ... } } or { title, html }
     const page = result as any;
     const data = page.data || page;
     const html: string = data.html || data.content || '';
     const title: string = data.title || page.title || '';
     const description: string = data.description || data.snippet || page.snippet || '';
 
-    // Extract images using comprehensive patterns
     const images = extractImagesFromHTML(html);
 
     return { title, images, description };
@@ -289,14 +371,12 @@ export async function readPageAndExtractImages(
 
 // ---------------------------------------------------------------------------
 // Extract image URLs directly from search result snippets and URLs
-// Some search results contain image URLs in their snippets or are image pages
 // ---------------------------------------------------------------------------
 
 function extractDirectImageUrls(results: SearchResult[]): string[] {
   const urls: string[] = [];
 
   for (const result of results) {
-    // Check if the URL itself points to an image hosting service
     const imageHostPatterns = [
       /unsplash\.com\/photos\//,
       /flickr\.com\/photos\//,
@@ -310,7 +390,6 @@ function extractDirectImageUrls(results: SearchResult[]): string[] {
 
     for (const pattern of imageHostPatterns) {
       if (pattern.test(result.url)) {
-        // These are image pages - we'll try to read them
         urls.push(result.url);
         break;
       }
@@ -341,146 +420,65 @@ export async function discoverImagesForFamily(
         ];
 
   try {
-    // ---- Strategy 1: Direct image URL search ----
-    // Search for images directly using the family-specific queries
-    for (const q of queries) {
+    // ---- Strategy 1: Primary web search ----
+    const primaryQuery = queries[0];
+    console.log(`[discover] Strategy 1: Web search for "${primaryQuery}"`);
+    const searchResults = await searchWeb(primaryQuery, 10);
+
+    // If search failed (likely 429), don't waste more API calls on other strategies
+    if (searchResults.length === 0) {
+      console.warn(`[discover] Strategy 1 returned 0 results, skipping remaining strategies to avoid 429`);
+      console.log(`[discover] Found ${items.length} images for family "${familyKey}"`);
+      return items;
+    }
+
+    // Identify image-rich pages from search results
+    const imagePageUrls = extractDirectImageUrls(searchResults);
+
+    // Read only top 2 image-rich pages
+    const pagesToRead = imagePageUrls.slice(0, 2);
+
+    for (const pageUrl of pagesToRead) {
       if (items.length >= maxItems) break;
 
-      console.log(`[discover] Strategy 1: Web search for "${q}"`);
-      const searchResults = await searchWeb(q, 10);
+      console.log(`[discover] Reading page: ${pageUrl}`);
+      const pageData = await readPageAndExtractImages(pageUrl);
 
-      // Identify image-rich pages from search results
-      const imagePageUrls = extractDirectImageUrls(searchResults);
-
-      // Read only top image-rich pages (max 3 per query for speed)
-      const pagesToRead = imagePageUrls.slice(0, 3);
-
-      for (const pageUrl of pagesToRead) {
-        if (items.length >= maxItems) break;
-
-        await delay(500);
-        console.log(`[discover] Reading page: ${pageUrl}`);
-        const pageData = await readPageAndExtractImages(pageUrl);
-
-        // Only take the top 3 images per page to diversify sources
-        const topImages = pageData.images.slice(0, 3);
-
-        for (const imageUrl of topImages) {
-          if (items.length >= maxItems) break;
-          if (seenUrls.has(imageUrl)) continue;
-
-          seenUrls.add(imageUrl);
-          items.push({
-            imageUrl,
-            title: pageData.title || searchResults.find(r => r.url === pageUrl)?.name || '',
-            sourceUrl: pageUrl,
-            description: pageData.description || searchResults.find(r => r.url === pageUrl)?.snippet || '',
-            familyKey,
-          });
-        }
+      // If page_reader returned 0 images after successful search, might be 429
+      // Don't waste more calls
+      if (pageData.images.length === 0 && searchResults.length > 0) {
+        console.warn(`[discover] Page reader returned 0 images, may be rate-limited. Stopping discovery.`);
+        break;
       }
 
-      // If we still need more, try reading non-image pages
-      if (items.length < maxItems) {
-        const otherPages = searchResults
-          .filter(r => !imagePageUrls.includes(r.url))
-          .slice(0, 2);
+      const topImages = pageData.images.slice(0, 3);
 
-        for (const result of otherPages) {
-          if (items.length >= maxItems) break;
+      for (const imageUrl of topImages) {
+        if (items.length >= maxItems) break;
+        if (seenUrls.has(imageUrl)) continue;
 
-          await delay(500);
-          const pageData = await readPageAndExtractImages(result.url);
-          const topImages = pageData.images.slice(0, 2);
-
-          for (const imageUrl of topImages) {
-            if (items.length >= maxItems) break;
-            if (seenUrls.has(imageUrl)) continue;
-
-            seenUrls.add(imageUrl);
-            items.push({
-              imageUrl,
-              title: pageData.title || result.name,
-              sourceUrl: result.url,
-              description: pageData.description || result.snippet || '',
-              familyKey,
-            });
-          }
-        }
+        seenUrls.add(imageUrl);
+        items.push({
+          imageUrl,
+          title: pageData.title || searchResults.find(r => r.url === pageUrl)?.name || '',
+          sourceUrl: pageUrl,
+          description: pageData.description || searchResults.find(r => r.url === pageUrl)?.snippet || '',
+          familyKey,
+        });
       }
     }
 
-    // ---- Strategy 2: Unsplash-specific search ----
-    // If we still don't have enough images, try Unsplash directly
-    if (items.length < maxItems) {
-      const unsplashQuery = query?.trim() || `${familyKey.replace(/_/g, ' ')} aesthetic`;
-      console.log(`[discover] Strategy 2: Unsplash search for "${unsplashQuery}"`);
+    // If we still need more, try reading non-image pages (max 1)
+    if (items.length < maxItems && searchResults.length > 0) {
+      const otherPages = searchResults
+        .filter(r => !imagePageUrls.includes(r.url))
+        .slice(0, 1);
 
-      const unsplashResults = await searchWeb(
-        `site:unsplash.com ${unsplashQuery}`,
-        5
-      );
-
-      for (const result of unsplashResults) {
+      for (const result of otherPages) {
         if (items.length >= maxItems) break;
 
-        // Extract photo ID from Unsplash URL
-        const unsplashMatch = result.url.match(/unsplash\.com\/photos\/([a-zA-Z0-9_-]+)/);
-        if (unsplashMatch) {
-          // Construct a direct image URL using Unsplash's CDN
-          const photoId = unsplashMatch[1];
-          const imageUrl = `https://images.unsplash.com/photo-${photoId}?w=1200&q=80`;
-
-          if (!seenUrls.has(imageUrl)) {
-            seenUrls.add(imageUrl);
-            items.push({
-              imageUrl,
-              title: result.name,
-              sourceUrl: result.url,
-              description: result.snippet || '',
-              familyKey,
-            });
-          }
-        } else {
-          // Try reading the Unsplash page
-          await delay(500);
-          const pageData = await readPageAndExtractImages(result.url);
-          // Unsplash pages have og:image tags
-          const topImages = pageData.images.slice(0, 2);
-
-          for (const imageUrl of topImages) {
-            if (items.length >= maxItems) break;
-            if (seenUrls.has(imageUrl)) continue;
-
-            seenUrls.add(imageUrl);
-            items.push({
-              imageUrl,
-              title: pageData.title || result.name,
-              sourceUrl: result.url,
-              description: pageData.description || result.snippet || '',
-              familyKey,
-            });
-          }
-        }
-      }
-    }
-
-    // ---- Strategy 3: Behance/Dribbble search ----
-    if (items.length < maxItems) {
-      const designQuery = query?.trim() || `${familyKey.replace(/_/g, ' ')} design`;
-      console.log(`[discover] Strategy 3: Design platforms search for "${designQuery}"`);
-
-      const designResults = await searchWeb(
-        `site:behance.net OR site:dribbble.com ${designQuery}`,
-        5
-      );
-
-      for (const result of designResults) {
-        if (items.length >= maxItems) break;
-
-        await delay(500);
         const pageData = await readPageAndExtractImages(result.url);
-        const topImages = pageData.images.slice(0, 3);
+        const topImages = pageData.images.slice(0, 2);
 
         for (const imageUrl of topImages) {
           if (items.length >= maxItems) break;
@@ -494,6 +492,99 @@ export async function discoverImagesForFamily(
             description: pageData.description || result.snippet || '',
             familyKey,
           });
+        }
+      }
+    }
+
+    // ---- Strategy 2: Additional queries (only if Strategy 1 found few items) ----
+    if (items.length < Math.ceil(maxItems / 2) && queries.length > 1) {
+      const secondQuery = queries[1];
+      console.log(`[discover] Strategy 2: Additional search for "${secondQuery}"`);
+
+      await delay(5000); // 5s between strategies
+
+      const moreResults = await searchWeb(secondQuery, 5);
+
+      if (moreResults.length === 0) {
+        console.warn(`[discover] Strategy 2 returned 0 results, stopping to avoid 429`);
+      } else {
+        const moreImageUrls = extractDirectImageUrls(moreResults);
+
+        for (const pageUrl of moreImageUrls.slice(0, 1)) {
+          if (items.length >= maxItems) break;
+
+          const pageData = await readPageAndExtractImages(pageUrl);
+          const topImages = pageData.images.slice(0, 2);
+
+          for (const imageUrl of topImages) {
+            if (items.length >= maxItems) break;
+            if (seenUrls.has(imageUrl)) continue;
+
+            seenUrls.add(imageUrl);
+            items.push({
+              imageUrl,
+              title: pageData.title || moreResults.find(r => r.url === pageUrl)?.name || '',
+              sourceUrl: pageUrl,
+              description: pageData.description || moreResults.find(r => r.url === pageUrl)?.snippet || '',
+              familyKey,
+            });
+          }
+        }
+      }
+    }
+
+    // ---- Strategy 3: Unsplash-specific search (only if still below half target) ----
+    if (items.length < Math.ceil(maxItems / 2)) {
+      const unsplashQuery = query?.trim() || `${familyKey.replace(/_/g, ' ')} aesthetic`;
+      console.log(`[discover] Strategy 3: Unsplash search for "${unsplashQuery}"`);
+
+      await delay(5000); // 5s between strategies
+
+      const unsplashResults = await searchWeb(
+        `site:unsplash.com ${unsplashQuery}`,
+        5
+      );
+
+      if (unsplashResults.length === 0) {
+        console.warn(`[discover] Strategy 3 returned 0 results, stopping to avoid 429`);
+      } else {
+        for (const result of unsplashResults) {
+          if (items.length >= maxItems) break;
+
+          const unsplashMatch = result.url.match(/unsplash\.com\/photos\/([a-zA-Z0-9_-]+)/);
+          if (unsplashMatch) {
+            const photoId = unsplashMatch[1];
+            const imageUrl = `https://images.unsplash.com/photo-${photoId}?w=1200&q=80`;
+
+            if (!seenUrls.has(imageUrl)) {
+              seenUrls.add(imageUrl);
+              items.push({
+                imageUrl,
+                title: result.name,
+                sourceUrl: result.url,
+                description: result.snippet || '',
+                familyKey,
+              });
+            }
+          } else if (items.length < maxItems) {
+            // Try reading the Unsplash page (only 1)
+            const pageData = await readPageAndExtractImages(result.url);
+            const topImages = pageData.images.slice(0, 2);
+
+            for (const imageUrl of topImages) {
+              if (items.length >= maxItems) break;
+              if (seenUrls.has(imageUrl)) continue;
+
+              seenUrls.add(imageUrl);
+              items.push({
+                imageUrl,
+                title: pageData.title || result.name,
+                sourceUrl: result.url,
+                description: pageData.description || result.snippet || '',
+                familyKey,
+              });
+            }
+          }
         }
       }
     }

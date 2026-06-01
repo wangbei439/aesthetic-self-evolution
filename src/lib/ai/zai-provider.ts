@@ -12,22 +12,36 @@ const LLM_MODEL = "glm-4-plus";
 let _lastHealthCheck: { time: number; result: ProviderHealth } | null = null;
 const HEALTH_CACHE_MS = 60_000;
 
+// Global minimum interval between AI API calls to avoid 429 rate limits
+const MIN_AI_CALL_INTERVAL_MS = 5000; // 5 seconds between AI calls
+let _lastAICallTime = 0;
+
 // Retry helper with exponential backoff for 429 errors
 async function retryWithBackoff<T>(
   fn: () => Promise<T>,
   maxRetries = 3,
-  baseDelayMs = 5000
+  baseDelayMs = 10000 // Start with 10 seconds instead of 5
 ): Promise<T> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
+      // Enforce minimum interval between AI calls
+      const now = Date.now();
+      const elapsed = now - _lastAICallTime;
+      if (elapsed < MIN_AI_CALL_INTERVAL_MS) {
+        const waitMs = MIN_AI_CALL_INTERVAL_MS - elapsed;
+        await new Promise((r) => setTimeout(r, waitMs));
+      }
+      _lastAICallTime = Date.now();
+
       return await fn();
     } catch (error: unknown) {
       const is429 =
         error instanceof Error &&
         (error.message.includes('429') || error.message.includes('Too many requests'));
       if (!is429 || attempt === maxRetries) throw error;
-      const waitMs = baseDelayMs * Math.pow(2, attempt);
-      console.warn(`[ZAI] 429 rate limited, retrying in ${waitMs}ms (attempt ${attempt + 1}/${maxRetries})`);
+      const waitMs = baseDelayMs * Math.pow(2, attempt); // 10s → 20s → 40s
+      console.warn(`[ZAI] 429 rate limited, retrying in ${waitMs / 1000}s (attempt ${attempt + 1}/${maxRetries})`);
+      _lastAICallTime = Date.now();
       await new Promise((r) => setTimeout(r, waitMs));
     }
   }

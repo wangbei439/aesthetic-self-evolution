@@ -30,6 +30,7 @@ export async function GET() {
             }
           : null,
         error: status.error,
+        rateLimited: status.rateLimited || false,
       },
     });
   } catch (error) {

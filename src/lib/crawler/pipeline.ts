@@ -22,12 +22,14 @@ export interface PipelineStatus {
     | 'evaluating'
     | 'evolving'
     | 'complete'
-    | 'error';
+    | 'error'
+    | 'rate_limited';
   currentFamily: string | null;
   progress: { current: number; total: number };
   lastRunAt: Date | null;
   lastResult: PipelineResult | null;
   error: string | null;
+  rateLimited: boolean;
 }
 
 export interface PipelineResult {
@@ -56,6 +58,7 @@ const DEFAULT_STATE: PipelineStatus = {
   lastRunAt: null,
   lastResult: null,
   error: null,
+  rateLimited: false,
 };
 
 const globalForPipeline = globalThis as unknown as {
@@ -84,6 +87,13 @@ export function getPipelineStatus(): PipelineStatus {
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+// Minimum delay between processing different families (ms)
+// This prevents rapid-fire API calls across families that trigger 429 rate limits
+const INTER_FAMILY_DELAY_MS = 10000; // 10 seconds between families (increased to avoid 429)
+
+// Minimum delay between evaluations (ms)
+const INTER_EVALUATION_DELAY_MS = 5000; // 5 seconds between evaluations (increased to avoid 429)
 
 // ---------------------------------------------------------------------------
 // Fetch image from URL and convert to base64
@@ -229,10 +239,27 @@ export async function runPipeline(options: {
     // PHASE 1: DISCOVERY
     // ======================================================================
     pipelineState.currentPhase = 'discovering';
+    pipelineState.rateLimited = false;
     pipelineState.progress = { current: 0, total: familyKeys.length };
+
+    // Track if discovery is being rate-limited
+    let discoveryRateLimited = false;
 
     for (const fk of familyKeys) {
       pipelineState.currentFamily = fk;
+
+      // If all previous families were rate-limited, stop trying to avoid wasting API calls
+      if (discoveryRateLimited) {
+        console.warn(`[pipeline] Skipping family ${fk} due to rate limiting`);
+        pipelineState.progress.current++;
+        continue;
+      }
+
+      // Add delay between families to prevent 429 rate limiting
+      if (pipelineState.progress.current > 0) {
+        console.log(`[pipeline] Waiting ${INTER_FAMILY_DELAY_MS / 1000}s before processing family ${fk}...`);
+        await delay(INTER_FAMILY_DELAY_MS);
+      }
 
       try {
         const discoveredItems = await discoverImagesForFamily(
@@ -240,6 +267,20 @@ export async function runPipeline(options: {
           undefined,
           maxItemsPerFamily
         );
+
+        // If discovery returned 0 items and we're getting 429s, mark as rate-limited
+        if (discoveredItems.length === 0) {
+          console.warn(`[pipeline] Family ${fk}: 0 items discovered, may be rate-limited`);
+          // Check if this might be rate limiting by seeing if the family had results before
+          const previousItems = await db.crawledItem.count({
+            where: { familyKey: fk },
+          });
+          if (previousItems === 0) {
+            // No items at all - could be rate limiting
+            discoveryRateLimited = true;
+            pipelineState.rateLimited = true;
+          }
+        }
 
         for (const item of discoveredItems) {
           try {
@@ -393,8 +434,8 @@ export async function runPipeline(options: {
 
       pipelineState.progress.current++;
 
-      // Rate limiting - 3 second delay between evaluations to avoid 429
-      await delay(3000);
+      // Rate limiting - delay between evaluations to avoid 429
+      await delay(INTER_EVALUATION_DELAY_MS);
     }
 
     // Update task evaluation counts
@@ -416,6 +457,11 @@ export async function runPipeline(options: {
 
       for (const fk of familyKeys) {
         pipelineState.currentFamily = fk;
+
+        // Add delay between family evolutions
+        if (pipelineState.progress.current > 0) {
+          await delay(3000); // 3 second delay between family evolutions
+        }
 
         try {
           // Check if this family now has >= 3 new evaluations from this task
@@ -480,7 +526,12 @@ export async function runPipeline(options: {
     // ======================================================================
     // COMPLETE
     // ======================================================================
-    pipelineState.currentPhase = 'complete';
+    if (result.itemsDiscovered === 0 && result.itemsEvaluated === 0 && discoveryRateLimited) {
+      pipelineState.currentPhase = 'rate_limited';
+      pipelineState.error = 'API 请求频率超限 (429)，请等待几分钟后重试。自动重试已包含指数退避，但当前配额可能已耗尽。';
+    } else {
+      pipelineState.currentPhase = 'complete';
+    }
 
     // Update CrawlTask status to "completed"
     await db.crawlTask.update({
