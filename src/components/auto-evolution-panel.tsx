@@ -299,7 +299,11 @@ export function AutoEvolutionPanel() {
           setItems(newItems)
           setItemsOffset(ITEMS_PAGE_SIZE)
         } else {
-          setItems(prev => [...prev, ...newItems])
+          setItems(prev => {
+            const existingIds = new Set(prev.map(i => i.id))
+            const unique = newItems.filter((i: CrawledItem) => !existingIds.has(i.id))
+            return [...prev, ...unique]
+          })
           setItemsOffset(prev => prev + ITEMS_PAGE_SIZE)
         }
         setItemsHasMore(data.pagination?.hasMore ?? false)
@@ -1230,7 +1234,7 @@ export function AutoEvolutionPanel() {
 
                     return (
                       <motion.div
-                        key={item.id}
+                        key={`${item.id}-${idx}`}
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, scale: 0.95 }}
