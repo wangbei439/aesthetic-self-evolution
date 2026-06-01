@@ -43,10 +43,12 @@ export interface PipelineResult {
 }
 
 // ---------------------------------------------------------------------------
-// In-memory pipeline state (singleton)
+// In-memory pipeline state (singleton, persisted via globalThis)
+// Next.js with Turbopack may create separate module instances for different
+// API routes, so we use globalThis to ensure the state is shared.
 // ---------------------------------------------------------------------------
 
-const pipelineState: PipelineStatus = {
+const DEFAULT_STATE: PipelineStatus = {
   isRunning: false,
   currentPhase: 'idle',
   currentFamily: null,
@@ -55,6 +57,17 @@ const pipelineState: PipelineStatus = {
   lastResult: null,
   error: null,
 };
+
+const globalForPipeline = globalThis as unknown as {
+  __pipelineState: PipelineStatus | undefined;
+};
+
+const pipelineState: PipelineStatus =
+  globalForPipeline.__pipelineState ?? { ...DEFAULT_STATE };
+
+if (process.env.NODE_ENV !== 'production') {
+  globalForPipeline.__pipelineState = pipelineState;
+}
 
 // ---------------------------------------------------------------------------
 // Get current pipeline status
@@ -368,8 +381,8 @@ export async function runPipeline(options: {
 
       pipelineState.progress.current++;
 
-      // Rate limiting - 1 second delay between evaluations
-      await delay(1000);
+      // Rate limiting - 3 second delay between evaluations to avoid 429
+      await delay(3000);
     }
 
     // Update task evaluation counts

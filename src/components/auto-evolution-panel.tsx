@@ -260,9 +260,12 @@ export function AutoEvolutionPanel() {
 
   useEffect(() => {
     fetchPipelineStatus()
-    const interval = setInterval(fetchPipelineStatus, 5000)
-    return () => clearInterval(interval)
-  }, [fetchPipelineStatus])
+    // Poll faster when pipeline is running, slower when idle
+    const getInterval = () => pipelineRunning ? 2000 : 10000
+    let intervalId = setInterval(fetchPipelineStatus, getInterval())
+    // Re-set interval when pipelineRunning changes
+    return () => clearInterval(intervalId)
+  }, [fetchPipelineStatus, pipelineRunning])
 
   // Auto-scroll log panel when status changes
   useEffect(() => {
@@ -423,7 +426,8 @@ export function AutoEvolutionPanel() {
         throw new Error(err.error || 'Pipeline启动失败')
       }
       toast.success('全自动进化Pipeline已启动')
-      setTimeout(fetchPipelineStatus, 2000)
+      // Immediately poll for status, then the useEffect interval will take over
+      fetchPipelineStatus()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '启动失败，请重试')
       setPipelineRunning(false)
@@ -447,7 +451,7 @@ export function AutoEvolutionPanel() {
         throw new Error(err.error || '发现失败')
       }
       toast.success('发现任务已启动')
-      setTimeout(fetchPipelineStatus, 2000)
+      fetchPipelineStatus()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '发现失败，请重试')
       setPipelineRunning(false)
